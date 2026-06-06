@@ -47,5 +47,5 @@ def create_customer_excel():
 
     result_df = pd.DataFrame(customer_data)
     result_df.to_excel("customer_combined.xlsx", index=False)
-    print(f"宸插垱寤?customer_combined.xlsx锛屽叡 {len(result_df)} 鏉¤褰?")
+    print(f"已创建 customer_combined.xlsx，共 {len(result_df)} 条记录")
 

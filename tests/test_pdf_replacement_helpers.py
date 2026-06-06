@@ -1,0 +1,57 @@
+from src.deliverynotechg.pdf_contact import (
+    build_pdf_replacement_plan,
+    build_weight_replacement_text,
+    extract_company_name_from_pdf,
+    extract_handling_units_from_pdf,
+    find_hu_info_in_excel,
+)
+
+
+def test_build_weight_replacement_text_keeps_right_side_of_slash():
+    result = build_weight_replacement_text("520.000 / 400.000 KG", 470.5)
+
+    assert result == "470.500   /400.000    KG"
+
+
+def test_extract_handling_units_from_pdf_finds_second_number():
+    handling_units = extract_handling_units_from_pdf("archive/ZSD_DELIVERY_NOTE_SF.pdf")
+
+    assert handling_units == ["553977534", "553977533"]
+
+
+def test_extract_company_name_from_pdf_handles_chinese_delivery_address():
+    company_name = extract_company_name_from_pdf("ZSD_DELIVERY_NOTE_SF.pdf")
+
+    assert company_name == {"chinese": "河南海威新能源科技有限公司", "english": None}
+
+
+def test_find_hu_info_in_excel_uses_exact_handling_unit_match_and_sums_weight():
+    hu_info = find_hu_info_in_excel(["553977534", "553977533"], "EXPORT_20260604132137-hu.xlsx")
+
+    assert hu_info == {
+        "hu_info_list": [
+            {
+                "handling_unit": "553977534",
+                "batch_number": "2026050704",
+                "hu_identification_2": "2026050704",
+                "total_weight": 270.0,
+            },
+            {
+                "handling_unit": "553977533",
+                "batch_number": "2026050703",
+                "hu_identification_2": "2026050703",
+                "total_weight": 270.0,
+            },
+        ],
+        "total_weight_sum": 540.0,
+    }
+
+
+def test_build_pdf_replacement_plan_finds_batch_and_weight_targets():
+    hu_info = find_hu_info_in_excel(["553977534", "553977533"], "EXPORT_20260604132137-hu.xlsx")
+
+    plan = build_pdf_replacement_plan("ZSD_DELIVERY_NOTE_SF.pdf", hu_info)
+
+    assert [item["text"] for item in plan["batch_replacements"]] == ["2026050704", "2026050703"]
+    assert plan["gross_weight_replacement"]["text"] == "540.000   /400.000    KG"
+    assert plan["gross_weight_replacement"]["x"] == 394.0

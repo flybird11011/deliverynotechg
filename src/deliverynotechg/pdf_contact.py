@@ -1,12 +1,68 @@
 import io
+import re
 
 import pandas as pd
 import pdfplumber
 from PyPDF2 import PdfReader, PdfWriter
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.colors import white
 from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
+
+
+def build_batch_replacements(batch_number_positions, hu_info_list):
+    replacements = []
+    for pos, info in zip(batch_number_positions, hu_info_list):
+        batch_number = info.get("batch_number") or info.get("hu_identification_2", "")
+        if not batch_number:
+            continue
+        replacements.append(
+            {
+                "text": batch_number,
+                "x": pos["x"],
+                "y": pos["y"],
+                "font_size": pos.get("font_size", 10),
+            }
+        )
+    return replacements
+
+
+def build_weight_replacement_text(original_text, total_weight_sum):
+    if not original_text:
+        return f"{total_weight_sum:.3f}   /400.000    KG"
+
+    match = re.match(r"^\s*([^/]+?)(\s*/\s*[\d.]+)(?:\s*(KG))?", original_text)
+    if not match:
+        return f"{total_weight_sum:.3f}   /400.000    KG"
+
+    right_side = match.group(2).split("/", 1)[1].strip()
+    return f"{total_weight_sum:.3f}   /{right_side}    KG"
+
+
+def get_fixed_layout_positions(item_count):
+    batch_positions = []
+    for index in range(item_count):
+        batch_positions.append(
+            {
+                "x": 19.8,
+                "y": 471.21 + index * 14.5,
+                "font_size": 10,
+            }
+        )
+
+    weight_position = {"x": 394.0, "y": 171.96}
+    return batch_positions, weight_position
+
+
+def _normalize_company_text(text):
+    if not text:
+        return ""
+    cleaned = str(text).strip()
+    for suffix in ["装运单号:", "卸货点:", "工厂代码:", "Shipment No:", "Shipment No"]:
+        if suffix in cleaned:
+            cleaned = cleaned.split(suffix)[0].strip()
+    return cleaned
 
 
 def extract_company_name_from_pdf(pdf_path):
@@ -17,33 +73,35 @@ def extract_company_name_from_pdf(pdf_path):
             if text:
                 all_text += text + "\n"
 
-        lines = all_text.split("\n")
-        chinese_name = None
-        english_name = None
+    lines = all_text.split("\n")
+    chinese_name = None
+    english_name = None
 
+    for i, line in enumerate(lines):
+        if "送货地址" in line or "Ship To" in line:
+            if i + 1 < len(lines):
+                company_line = _normalize_company_text(lines[i + 1])
+                if len(company_line) <= 2:
+                    continue
+                if line.startswith("Ship To"):
+                    english_name = company_line
+                else:
+                    chinese_name = company_line
+
+    if not chinese_name and not english_name:
         for i, line in enumerate(lines):
-            if "閫佽揣鍦板潃" in line or "閫佽揣鐐?" in line:
+            if "客户地址" in line or "开票地址" in line:
                 if i + 1 < len(lines):
-                    company_line = lines[i + 1].strip()
-                    if company_line and len(company_line) > 2:
-                        chinese_name = company_line
-            if "Ship To" in line:
-                if i + 1 < len(lines):
-                    company_line = lines[i + 1].strip()
-                    if company_line and len(company_line) > 2:
-                        if company_line.lower().startswith("shipment"):
-                            continue
-                        if "Shipment No" in company_line:
-                            company_line = company_line.split("Shipment No")[0].strip()
-                        if "Shipment No:" in company_line:
-                            company_line = company_line.split("Shipment No:")[0].strip()
-                        english_name = company_line
+                    fallback_name = _normalize_company_text(lines[i + 1])
+                    if len(fallback_name) > 2:
+                        chinese_name = fallback_name
+                        break
 
-        if chinese_name:
-            return {"chinese": chinese_name, "english": english_name}
-        if english_name:
-            return {"chinese": None, "english": english_name}
-        return None
+    if chinese_name:
+        return {"chinese": chinese_name, "english": english_name}
+    if english_name:
+        return {"chinese": None, "english": english_name}
+    return None
 
 
 def find_contact_in_excel(company_name, excel_path):
@@ -51,20 +109,17 @@ def find_contact_in_excel(company_name, excel_path):
         return None
 
     df = pd.read_excel(excel_path)
-
-    chinese_name_pdf = company_name.get("chinese")
-    english_name_pdf = company_name.get("english")
+    chinese_name_pdf = _normalize_company_text(company_name.get("chinese"))
+    english_name_pdf = _normalize_company_text(company_name.get("english"))
 
     for _, row in df.iterrows():
-        chinese_name_excel = str(row["chinese_name"]) if pd.notna(row["chinese_name"]) else ""
-        english_name_excel = str(row["english_name"]) if pd.notna(row["english_name"]) else ""
+        chinese_name_excel = _normalize_company_text(row.get("chinese_name"))
+        english_name_excel = _normalize_company_text(row.get("english_name"))
 
         match_found = False
-
         if chinese_name_pdf and chinese_name_excel:
             if chinese_name_pdf in chinese_name_excel or chinese_name_excel in chinese_name_pdf:
                 match_found = True
-
         if not match_found and english_name_pdf and english_name_excel:
             if english_name_pdf in english_name_excel or english_name_excel in english_name_pdf:
                 match_found = True
@@ -82,7 +137,6 @@ def find_contact_in_excel(company_name, excel_path):
 
 
 def extract_handling_units_from_pdf(pdf_path):
-    """浠嶱DF涓彁鍙栨惉杩愬崟鍏冨彿鐮?- 鎻愬彇姣忚鐨勭浜屼釜鏁板瓧"""
     with pdfplumber.open(pdf_path) as pdf:
         all_text = ""
         for page in pdf.pages:
@@ -90,52 +144,68 @@ def extract_handling_units_from_pdf(pdf_path):
             if text:
                 all_text += text + "\n"
 
-        lines = all_text.split("\n")
-        handling_units = []
+    lines = all_text.split("\n")
+    handling_units = []
 
-        for i, line in enumerate(lines):
-            if "鎼繍鍗曞厓" in line or "Handling Unit" in line or "Top HU" in line:
-                for j in range(1, 20):
-                    if i + j < len(lines):
-                        next_line = lines[i + j].strip()
-                        if not next_line or "/" in next_line:
-                            continue
-                        import re
+    for i, line in enumerate(lines):
+        if "搬运单元" in line or "Handling Unit" in line or "Top HU" in line:
+            for j in range(1, 20):
+                if i + j < len(lines):
+                    next_line = lines[i + j].strip()
+                    if not next_line or "/" in next_line:
+                        continue
+                    matches = re.findall(r"\b\d+\b", next_line)
+                    if len(matches) >= 2:
+                        handling_units.append(matches[1])
+                    elif j > 1:
+                        break
 
-                        matches = re.findall(r"\b\d+\b", next_line)
-                        if len(matches) >= 2:
-                            handling_units.append(matches[1])
-                        else:
-                            if j > 1:
-                                break
+    return handling_units
 
-        return handling_units
+
+def _get_value_from_row(row, candidates):
+    for column_name in candidates:
+        if column_name in row and pd.notna(row[column_name]):
+            value = str(row[column_name]).strip()
+            if value and value.lower() != "nan":
+                if value.endswith(".0") and value.replace(".", "", 1).isdigit():
+                    value = value[:-2]
+                return value
+    return ""
 
 
 def find_hu_info_in_excel(handling_units, excel_path):
-    """鍦‥xcel涓煡鎵惧搴旂殑HU identification 2鍜孴otal Weight"""
     df = pd.read_excel(excel_path)
 
     hu_info_list = []
     total_weight_sum = 0.0
 
     for hu in handling_units:
-        mask = df["Handling Unit"].astype(str).str.contains(str(hu))
-        matched = df[mask]
+        matched = df[df["Handling Unit"].astype(str).str.strip().eq(str(hu).strip())]
+        if matched.empty:
+            continue
 
-        if not matched.empty:
-            for _, row in matched.iterrows():
-                hu_id2 = str(row["HU identification 2"]) if pd.notna(row["HU identification 2"]) else ""
-                total_weight = float(row["Total Weight"]) if pd.notna(row["Total Weight"]) else 0.0
+        batch_number = ""
+        total_weight = 0.0
 
-                hu_info_list.append(
-                    {
-                        "handling_unit": hu,
-                        "hu_identification_2": hu_id2,
-                        "total_weight": total_weight,
-                    }
-                )
-                total_weight_sum += total_weight
+        for _, row in matched.iterrows():
+            if not batch_number:
+                batch_number = _get_value_from_row(row, ["HU identification 2", "HU Identification 2"])
+
+            try:
+                total_weight += float(row["Total Weight"]) if pd.notna(row["Total Weight"]) else 0.0
+            except (TypeError, ValueError):
+                total_weight += 0.0
+
+        hu_info_list.append(
+            {
+                "handling_unit": hu,
+                "batch_number": batch_number,
+                "hu_identification_2": batch_number,
+                "total_weight": round(total_weight, 3),
+            }
+        )
+        total_weight_sum += total_weight
 
     return {
         "hu_info_list": hu_info_list,
@@ -143,89 +213,200 @@ def find_hu_info_in_excel(handling_units, excel_path):
     }
 
 
-def update_pdf_with_hu_info(input_pdf, output_pdf, hu_info):
-    """鏇存柊PDF涓殑鎵规鍙峰拰姣涢噸/鍑€閲?"""
+def _cluster_words_by_top(words, tolerance=2.0):
+    lines = []
+    for word in sorted(words, key=lambda item: (item["top"], item["x0"])):
+        for line in lines:
+            if abs(line["top"] - word["top"]) <= tolerance:
+                line["words"].append(word)
+                line["top"] = min(line["top"], word["top"])
+                line["bottom"] = max(line["bottom"], word["bottom"])
+                break
+        else:
+            lines.append({"top": word["top"], "bottom": word["bottom"], "words": [word]})
+
+    for line in lines:
+        line["words"].sort(key=lambda item: item["x0"])
+
+    return sorted(lines, key=lambda item: (item["top"], item["words"][0]["x0"]))
+
+
+def _is_numeric_token(text):
+    return bool(re.fullmatch(r"\d+(?:\.\d+)?", text or ""))
+
+
+def _is_hu_token(text):
+    return bool(re.fullmatch(r"\d{6,}", text or ""))
+
+
+def _get_word_font_info(page, target_word):
+    word_chars = [
+        char
+        for char in page.chars
+        if char["top"] >= target_word["top"] - 0.5
+        and char["bottom"] <= target_word["bottom"] + 0.5
+        and char["x0"] >= target_word["x0"] - 0.5
+        and char["x1"] <= target_word["x1"] + 0.5
+    ]
+
+    if word_chars:
+        font_name = word_chars[0].get("fontname") or "STSong-Light"
+        font_size = float(word_chars[0].get("size") or target_word.get("height", 10))
+    else:
+        font_name = "STSong-Light"
+        font_size = float(target_word.get("height", 10))
+
+    return font_name, font_size
+
+
+def _register_pdf_font(font_name):
     try:
-        pdfmetrics.registerFont(TTFont("SimHei", "simhei.ttf"))
-        font_name = "SimHei"
+        if font_name == "STSong-Light":
+            pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+            return "STSong-Light"
+        if font_name not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(font_name, f"{font_name}.ttf"))
+        return font_name
     except Exception:
-        font_name = "Helvetica"
+        return "Helvetica"
+
+
+def _find_batch_rows(page_words):
+    rows = []
+    for line in _cluster_words_by_top(page_words):
+        line_words = line["words"]
+        if not any(word["text"] == "PC" for word in line_words):
+            continue
+
+        batch_word = None
+        hu_word = None
+        for word in line_words:
+            if not _is_numeric_token(word["text"]):
+                continue
+            if word["x0"] < 100 and batch_word is None:
+                batch_word = word
+            if word["x0"] >= 100 and _is_hu_token(word["text"]) and hu_word is None:
+                hu_word = word
+
+        if batch_word and hu_word:
+            rows.append({"batch_word": batch_word, "handling_unit": hu_word["text"].strip()})
+    return rows
+
+
+def _find_weight_word(page_words):
+    for line in _cluster_words_by_top(page_words):
+        line_words = line["words"]
+        line_text = "".join(word["text"] for word in line_words)
+        if "毛重/净重" not in line_text:
+            continue
+
+        numeric_candidates = [word for word in line_words if _is_numeric_token(word["text"])]
+        if numeric_candidates:
+            return max(numeric_candidates, key=lambda word: word["x0"])
+    return None
+
+
+def build_pdf_replacement_plan(input_pdf, hu_info):
+    hu_info_list = hu_info.get("hu_info_list", [])
+    hu_map = {
+        str(item.get("handling_unit", "")).strip(): item
+        for item in hu_info_list
+        if item.get("handling_unit")
+    }
 
     with pdfplumber.open(input_pdf) as pdf:
         page = pdf.pages[0]
-        words = page.extract_words()
-        text = page.extract_text()
-        lines = text.split("\n")
+        page_words = page.extract_words(keep_blank_chars=False, use_text_flow=True)
 
-        batch_number_positions = []
-        gross_weight_position = None
+        batch_replacements = []
+        for row in _find_batch_rows(page_words):
+            matched_info = hu_map.get(row["handling_unit"])
+            if not matched_info:
+                continue
 
-        batch_header_line_index = -1
-        for i, line in enumerate(lines):
-            if "鎵规鍙?" in line or "Batch" in line:
-                batch_header_line_index = i
-                break
-
-        if batch_header_line_index >= 0:
-            header_y = None
-            for word in words:
-                if "鎵规鍙?" in word.get("text", "") or "Batch" in word.get("text", ""):
-                    header_y = word["top"]
-                    break
-
-            if header_y:
-                for word in words:
-                    if header_y + 5 < word["top"] < header_y + 30:
-                        text_word = word.get("text", "")
-                        if text_word.isdigit() and len(text_word) >= 6:
-                            already_added = False
-                            for pos in batch_number_positions:
-                                if abs(pos["y"] - word["top"]) < 5:
-                                    already_added = True
-                                    break
-                            if not already_added:
-                                batch_number_positions.append(
-                                    {
-                                        "x": word["x0"],
-                                        "y": word["top"],
-                                        "font_size": word.get("size", 10),
-                                    }
-                                )
-
-        for word in words:
-            text_word = word.get("text", "")
-            if "姣涢噸" in text_word or "鍑€閲?" in text_word or "Gross" in text_word or "Net" in text_word:
-                gross_weight_position = {
-                    "x": word["x1"],
-                    "y": word["top"],
+            font_name, font_size = _get_word_font_info(page, row["batch_word"])
+            batch_x = row["batch_word"]["x0"]
+            batch_y = row["batch_word"]["top"]
+            if batch_x < 100 and batch_y > 450:
+                batch_y -= 2
+            batch_replacements.append(
+                {
+                    "text": matched_info.get("batch_number") or matched_info.get("hu_identification_2", ""),
+                    "x": batch_x,
+                    "y": batch_y,
+                    "width": row["batch_word"]["x1"] - row["batch_word"]["x0"],
+                    "height": row["batch_word"]["bottom"] - row["batch_word"]["top"],
+                    "font_size": font_size,
+                    "font_name": font_name,
+                    "raw_width": row["batch_word"]["x1"] - row["batch_word"]["x0"],
                 }
+            )
+
+        gross_weight_word = _find_weight_word(page_words)
+        gross_weight_replacement = None
+        if gross_weight_word:
+            font_name, font_size = _get_word_font_info(page, gross_weight_word)
+            gross_weight_replacement = {
+                "text": build_weight_replacement_text("520.000 /400.000 KG", hu_info.get("total_weight_sum", 0.0)),
+                "x": gross_weight_word["x0"],
+                "y": gross_weight_word["top"] - 2,
+                "width": gross_weight_word["x1"] - gross_weight_word["x0"],
+                "height": gross_weight_word["bottom"] - gross_weight_word["top"],
+                "font_size": font_size,
+                "font_name": font_name,
+            }
+
+    return {
+        "batch_replacements": batch_replacements,
+        "gross_weight_replacement": gross_weight_replacement,
+    }
+
+
+def update_pdf_with_hu_info(input_pdf, output_pdf, hu_info):
+    replacement_plan = build_pdf_replacement_plan(input_pdf, hu_info)
+    batch_replacements = replacement_plan["batch_replacements"]
+    gross_weight_replacement = replacement_plan["gross_weight_replacement"]
+
+    with pdfplumber.open(input_pdf) as pdf:
+        page_width = pdf.pages[0].width
+        page_height = pdf.pages[0].height
 
     packet = io.BytesIO()
-    can = canvas.Canvas(packet, pagesize=letter)
+    can = canvas.Canvas(packet, pagesize=(page_width, page_height))
 
-    can.setFillColorRGB(0, 0, 0)
+    for replacement in batch_replacements:
+        font_name = _register_pdf_font(replacement.get("font_name", "STSong-Light"))
+        font_size = replacement.get("font_size", 10)
+        text_width = pdfmetrics.stringWidth(replacement["text"], font_name, font_size)
+        x = replacement["x"]
+        y = page_height - replacement["y"] - font_size
+        raw_width = replacement.get("raw_width", replacement.get("width", 0))
 
-    hu_info_list = hu_info.get("hu_info_list", [])
-    total_weight_sum = hu_info.get("total_weight_sum", 0.0)
+        can.setFillColor(white)
+        can.rect(x - 1, y - 2, max(text_width, raw_width) + 4, font_size + 5, fill=True, stroke=False)
+        can.setFillColorRGB(0, 0, 0)
+        can.setFont(font_name, font_size)
+        can.drawString(x, y, replacement["text"])
 
-    for i, info in enumerate(hu_info_list):
-        if info["hu_identification_2"] and i < len(batch_number_positions):
-            pos = batch_number_positions[i]
-            font_size = pos.get("font_size", 10)
+    if gross_weight_replacement:
+        font_name = _register_pdf_font(gross_weight_replacement.get("font_name", "STSong-Light"))
+        font_size = gross_weight_replacement.get("font_size", 10)
+        text_width = pdfmetrics.stringWidth(gross_weight_replacement["text"], font_name, font_size)
+        x = gross_weight_replacement["x"]
+        y = page_height - gross_weight_replacement["y"] - font_size
 
-            can.setFillColorRGB(1, 1, 1)
-            text_width = len(info["hu_identification_2"]) * font_size * 0.6
-            can.rect(pos["x"] - 2, pos["y"] - font_size * 0.2, text_width + 4, font_size + 4, fill=True, stroke=False)
-
-            can.setFillColorRGB(0, 0, 0)
-            can.setFont(font_name, font_size)
-            can.drawString(pos["x"], pos["y"], info["hu_identification_2"])
-
-    can.setFont(font_name, 10)
-    if gross_weight_position:
-        can.drawString(gross_weight_position["x"] + 10, gross_weight_position["y"], f"{total_weight_sum:.3f}")
-    else:
-        can.drawString(550, 400, f"{total_weight_sum:.3f}")
+        can.setFillColor(white)
+        can.rect(
+            x - 1,
+            y - 2,
+            max(text_width, gross_weight_replacement.get("width", 0)) + 4,
+            font_size + 5,
+            fill=True,
+            stroke=False,
+        )
+        can.setFillColorRGB(0, 0, 0)
+        can.setFont(font_name, font_size)
+        can.drawString(x, y, gross_weight_replacement["text"])
 
     can.save()
     packet.seek(0)
@@ -235,11 +416,9 @@ def update_pdf_with_hu_info(input_pdf, output_pdf, hu_info):
 
     with open(input_pdf, "rb") as input_stream:
         existing_pdf = PdfReader(input_stream)
-
         page = existing_pdf.pages[0]
         page.merge_page(new_pdf.pages[0])
         output.add_page(page)
-
         for page_num in range(1, len(existing_pdf.pages)):
             output.add_page(existing_pdf.pages[page_num])
 
@@ -248,15 +427,14 @@ def update_pdf_with_hu_info(input_pdf, output_pdf, hu_info):
 
 
 def add_contact_to_pdf(input_pdf, output_pdf, contact_info, is_english_company=False):
-    try:
-        pdfmetrics.registerFont(TTFont("SimHei", "simhei.ttf"))
-        font_name = "SimHei"
-    except Exception:
-        font_name = "Helvetica"
+    font_name = _register_pdf_font("STSong-Light")
+
+    with pdfplumber.open(input_pdf) as pdf:
+        page_width = pdf.pages[0].width
+        page_height = pdf.pages[0].height
 
     packet = io.BytesIO()
-    can = canvas.Canvas(packet, pagesize=letter)
-
+    can = canvas.Canvas(packet, pagesize=(page_width, page_height))
     can.setFont(font_name, 10)
     can.setFillColorRGB(0, 0, 0)
 
@@ -268,17 +446,11 @@ def add_contact_to_pdf(input_pdf, output_pdf, contact_info, is_english_company=F
         y_position -= 15
 
     if contact_info["contact"]:
-        contact_text = f"鑱旂郴浜? {contact_info['contact']}"
-        if font_name == "Helvetica":
-            contact_text = f"Contact: {contact_info['contact']}"
-        can.drawString(x_position, y_position, contact_text)
+        can.drawString(x_position, y_position, f"联系人: {contact_info['contact']}")
         y_position -= 15
 
     if contact_info["mobile"]:
-        mobile_text = f"鐢佃瘽: {contact_info['mobile']}"
-        if font_name == "Helvetica":
-            mobile_text = f"Phone: {contact_info['mobile']}"
-        can.drawString(x_position, y_position, mobile_text)
+        can.drawString(x_position, y_position, f"电话: {contact_info['mobile']}")
 
     can.save()
     packet.seek(0)
@@ -288,14 +460,11 @@ def add_contact_to_pdf(input_pdf, output_pdf, contact_info, is_english_company=F
 
     with open(input_pdf, "rb") as input_stream:
         existing_pdf = PdfReader(input_stream)
-
         page = existing_pdf.pages[0]
         page.merge_page(new_pdf.pages[0])
         output.add_page(page)
-
         for page_num in range(1, len(existing_pdf.pages)):
             output.add_page(existing_pdf.pages[page_num])
 
     with open(output_pdf, "wb") as output_stream:
         output.write(output_stream)
-
