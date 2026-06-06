@@ -1,0 +1,17 @@
+services:
+  deliverynotechg:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: deliverynotechg
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DELIVERYNOTE_WEB_BASE_DIR: /data/web_data
+      DELIVERYNOTE_WEB_DB_PATH: /data/web_data/jobs.db
+      DELIVERYNOTE_WEB_UPLOAD_DIR: /data/web_data/uploads
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:8000:8000"

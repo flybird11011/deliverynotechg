@@ -85,6 +85,17 @@ pyinstaller PDFContactTool.spec
 ```
 
 鎵撳寘浜х墿浼氱敓鎴愬湪 `dist/` 鐩綍涓嬨€?
+
+## VPS 部署
+
+如果 VPS 上已经有 nginx，推荐保留 nginx 作为入口层，只把 Python 服务放进 Docker Compose 里运行。详细方案见 [`docs/vps-deployment.md`](docs/vps-deployment.md)。
+
+简要结构如下：
+
+- nginx 反代到 `127.0.0.1:8000`
+- Docker 容器运行 FastAPI 后端
+- `data/` 目录挂载到宿主机，保存上传、输出和数据库
+- 通过 `.env` 配置上传大小、保留时间和 API key
 ## 澶勭悊娴佺▼
 
 1. 璇诲彇澶氫釜 Excel 婧愭枃浠?2. 鐢熸垚 `customer_combined.xlsx`

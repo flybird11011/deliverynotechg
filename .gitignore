@@ -27,6 +27,7 @@ dist/
 # Project runtime outputs
 output/
 archive/
+web_data/
 customer_combined.xlsx
 EXPORT_*.xlsx
 
