@@ -11,6 +11,13 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 
+_SYSTEM_FONT_FILES = {
+    "SimHei": r"C:\Windows\Fonts\simhei.ttf",
+    "NSimSun": r"C:\Windows\Fonts\simsun.ttc",
+    "SimSun": r"C:\Windows\Fonts\simsun.ttc",
+}
+
+
 def build_batch_replacements(batch_number_positions, hu_info_list):
     replacements = []
     for pos, info in zip(batch_number_positions, hu_info_list):
@@ -305,23 +312,53 @@ def _get_company_font_info(page, company_name, is_english_company=False):
         if is_english_company:
             if company_name.get("english"):
                 candidates.append(company_name["english"])
-            if company_name.get("chinese"):
-                candidates.append(company_name["chinese"])
         else:
             if company_name.get("chinese"):
                 candidates.append(company_name["chinese"])
-            if company_name.get("english"):
-                candidates.append(company_name["english"])
 
     for target_text in candidates:
         for word in page_words:
             if target_text and target_text in word.get("text", ""):
-                return _get_word_font_info(page, word)
+                return _get_word_font_info(page, word, target_text)
 
     return "STSong-Light", 10.0
 
 
-def _get_word_font_info(page, target_word):
+def _is_english_company_pdf(pdf_path, company_name=None):
+    if company_name:
+        chinese_name = _normalize_company_text(company_name.get("chinese"))
+        english_name = _normalize_company_text(company_name.get("english"))
+        if english_name and not chinese_name:
+            return True
+        if chinese_name and not english_name:
+            return False
+
+    with pdfplumber.open(pdf_path) as pdf:
+        page_text = pdf.pages[0].extract_text() or ""
+
+    normalized_text = page_text.lower()
+    english_markers = (
+        "ship to",
+        "company address",
+        "delivery note",
+        "gross/net weight",
+        "sold to:",
+        "unloading point:",
+    )
+    chinese_markers = (
+        "送货地址",
+        "公司地址",
+        "毛重/净重",
+        "客户地址",
+        "卸货点",
+    )
+
+    english_score = sum(marker in normalized_text for marker in english_markers)
+    chinese_score = sum(marker in page_text for marker in chinese_markers)
+    return english_score > chinese_score
+
+
+def _get_word_font_info(page, target_word, target_text=None):
     word_chars = [
         char
         for char in page.chars
@@ -332,7 +369,7 @@ def _get_word_font_info(page, target_word):
     ]
 
     if word_chars:
-        font_name = word_chars[0].get("fontname") or "STSong-Light"
+        font_name = _pick_font_from_chars(word_chars, target_text)
         font_size = float(word_chars[0].get("size") or target_word.get("height", 10))
     else:
         font_name = "STSong-Light"
@@ -341,13 +378,44 @@ def _get_word_font_info(page, target_word):
     return font_name, font_size
 
 
+def _pick_font_from_chars(word_chars, target_text=None):
+    font_names = [char.get("fontname") for char in word_chars if char.get("fontname")]
+    if not font_names:
+        return "STSong-Light"
+
+    if target_text == "（" or target_text == "）":
+        for font_name in font_names:
+            if "NSimSun" in font_name or "SimSun" in font_name:
+                return "NSimSun"
+        return "NSimSun"
+
+    for font_name in font_names:
+        if "SimHei" in font_name:
+            return "SimHei"
+
+    for font_name in font_names:
+        if "NSimSun" in font_name or "SimSun" in font_name:
+            return "NSimSun"
+
+    primary_font = font_names[0]
+    if primary_font.startswith("CIDFont+F1"):
+        return "SimHei"
+    if primary_font.startswith("CIDFont+F2"):
+        return "NSimSun"
+    return primary_font
+
+
 def _register_pdf_font(font_name):
     try:
         if font_name == "STSong-Light":
             pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
             return "STSong-Light"
         if font_name not in pdfmetrics.getRegisteredFontNames():
-            pdfmetrics.registerFont(TTFont(font_name, f"{font_name}.ttf"))
+            font_file = _SYSTEM_FONT_FILES.get(font_name, f"{font_name}.ttf")
+            if font_file.lower().endswith(".ttc"):
+                pdfmetrics.registerFont(TTFont(font_name, font_file, fontNumber=0))
+            else:
+                pdfmetrics.registerFont(TTFont(font_name, font_file))
         return font_name
     except Exception:
         return "Helvetica"
@@ -547,15 +615,18 @@ def add_contact_to_pdf(input_pdf, output_pdf, contact_info, is_english_company=F
 
     packet = io.BytesIO()
     can = canvas.Canvas(packet, pagesize=(page_width, page_height))
-    can.setFont(_register_pdf_font(font_name), font_size)
+    font_to_use = _register_pdf_font(font_name if not font_name.startswith("CIDFont+") else "STSong-Light")
+    can.setFont(font_to_use, font_size)
     can.setFillColorRGB(0, 0, 0)
 
     y_position = 675
     x_position = 84
 
     if is_english_company:
-        x_position += 10
+        x_position += 18
         y_position -= 15
+    else:
+        x_position += 8
 
     if contact_info["contact"]:
         can.drawString(x_position, y_position, f"联系人: {contact_info['contact']}")

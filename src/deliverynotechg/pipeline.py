@@ -10,6 +10,7 @@ from .pdf_contact import (
     extract_handling_units_from_pdf,
     find_contact_in_excel,
     find_hu_info_in_excel,
+    _is_english_company_pdf,
     update_pdf_with_hu_info,
 )
 
@@ -108,7 +109,7 @@ def process_pdf_files():
                 print(f"匹配到的联系人: {contact_info['contact']}")
                 print(f"匹配到的电话: {contact_info['mobile']}")
 
-                is_english_company = company_name and company_name.get("english") and not company_name.get("chinese")
+                is_english_company = _is_english_company_pdf(pdf_path, company_name)
                 add_contact_to_pdf(pdf_path, temp_pdf, contact_info, is_english_company)
                 print("已成功把联系人信息写入 PDF")
             else:
