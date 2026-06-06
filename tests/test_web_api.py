@@ -1,0 +1,107 @@
+import time
+
+import pytest
+from fastapi.testclient import TestClient
+
+from src.deliverynotechg.web.server import app
+
+
+def test_index_page_loads():
+    client = TestClient(app)
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert "Delivery Note PDF Tool" in resp.text
+
+
+def test_process_job_returns_job_id():
+    client = TestClient(app)
+    with open("customer_combined.xlsx", "rb") as excel_fp, open("archive/ZSD_DELIVERY_NOTE_SF.pdf", "rb") as pdf_fp:
+        resp = client.post(
+            "/api/process",
+            files={
+                "excel": (
+                    "customer_combined.xlsx",
+                    excel_fp,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+                "pdf": ("input.pdf", pdf_fp, "application/pdf"),
+            },
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["job_id"]
+    assert body["status"] == "queued"
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        status = client.get(f"/api/jobs/{body['job_id']}")
+        assert status.status_code == 200
+        if status.json()["status"] == "done":
+            break
+        time.sleep(0.2)
+    else:
+        pytest.fail("job did not finish in time")
+
+    download = client.get(f"/api/jobs/{body['job_id']}/download")
+    assert download.status_code == 200
+    assert download.headers["content-type"].startswith("application/pdf")
+
+
+def test_rejects_empty_uploads():
+    client = TestClient(app)
+    resp = client.post(
+        "/api/process",
+        files={
+            "excel": ("empty.xlsx", b"", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+            "pdf": ("empty.pdf", b"", "application/pdf"),
+        },
+    )
+
+    assert resp.status_code == 400
+    assert "Empty file" in resp.json()["detail"]
+
+
+def test_rejects_large_uploads(monkeypatch):
+    from src.deliverynotechg.web import server
+
+    monkeypatch.setattr(server, "config", type(server.config)(
+        base_dir=server.config.base_dir,
+        db_path=server.config.db_path,
+        upload_dir=server.config.upload_dir,
+        max_upload_size_mb=0,
+        job_retention_hours=server.config.job_retention_hours,
+        api_token=server.config.api_token,
+    ))
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/process",
+        files={
+            "excel": ("input.xlsx", b"1234", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+            "pdf": ("input.pdf", b"1234", "application/pdf"),
+        },
+    )
+
+    assert resp.status_code == 413
+    assert "File too large" in resp.json()["detail"]
+
+
+def test_requires_api_key_when_configured(monkeypatch):
+    from src.deliverynotechg.web import server
+
+    monkeypatch.setattr(server, "config", type(server.config)(
+        base_dir=server.config.base_dir,
+        db_path=server.config.db_path,
+        upload_dir=server.config.upload_dir,
+        max_upload_size_mb=server.config.max_upload_size_mb,
+        job_retention_hours=server.config.job_retention_hours,
+        api_token="secret-token",
+    ))
+
+    client = TestClient(app)
+    resp = client.get("/api/jobs/any")
+
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Invalid API key"
