@@ -1,6 +1,7 @@
-from src.deliverynotechg.pipeline import main
+"""Local development entry point."""
+
+from src.deliverynotechg.pipeline import main as run_pipeline
 
 
 if __name__ == "__main__":
-    main()
-
+    run_pipeline()

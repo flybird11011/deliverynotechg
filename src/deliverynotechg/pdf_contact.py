@@ -30,14 +30,14 @@ def build_batch_replacements(batch_number_positions, hu_info_list):
 
 def build_weight_replacement_text(original_text, total_weight_sum):
     if not original_text:
-        return f"{total_weight_sum:.3f}   /400.000    KG"
+        return f"{total_weight_sum:,.3f}   /400.000    KG"
 
     match = re.match(r"^\s*([^/]+?)(\s*/\s*[\d.]+)(?:\s*(KG))?", original_text)
     if not match:
-        return f"{total_weight_sum:.3f}   /400.000    KG"
+        return f"{total_weight_sum:,.3f}   /400.000    KG"
 
     right_side = match.group(2).split("/", 1)[1].strip()
-    return f"{total_weight_sum:.3f}   /{right_side}    KG"
+    return f"{total_weight_sum:,.3f}   /{right_side}    KG"
 
 
 def get_fixed_layout_positions(item_count):
@@ -239,6 +239,88 @@ def _is_hu_token(text):
     return bool(re.fullmatch(r"\d{6,}", text or ""))
 
 
+def _normalize_weight_token(text):
+    if not text:
+        return ""
+
+    value = str(text).strip().replace(" ", "")
+    if not value:
+        return ""
+
+    if "," in value and "." in value:
+        last_comma = value.rfind(",")
+        last_dot = value.rfind(".")
+        if last_comma > last_dot:
+            integer_part = value[:last_comma].replace(".", "")
+            decimal_part = value[last_comma + 1 :]
+            return f"{integer_part}.{decimal_part}"
+        integer_part = value[:last_dot].replace(",", "")
+        decimal_part = value[last_dot + 1 :]
+        return f"{integer_part}.{decimal_part}"
+
+    if "," in value:
+        left, right = value.split(",", 1)
+        if right.isdigit():
+            return f"{left.replace('.', '').replace(',', '')}.{right}"
+
+    return value
+
+
+def _format_weight_for_output(text):
+    normalized = _normalize_weight_token(text)
+    if not normalized:
+        return ""
+
+    if "." not in normalized:
+        return normalized
+
+    integer_part, decimal_part = normalized.split(".", 1)
+    integer_part = integer_part.replace(",", "")
+    if integer_part.isdigit() and len(integer_part) > 3:
+        integer_part = f"{int(integer_part):,}"
+    elif integer_part.isdigit():
+        integer_part = str(int(integer_part))
+
+    return f"{integer_part}.{decimal_part}"
+
+
+def _format_weight_like_sample(sample_text, total_weight_sum):
+    sample = str(sample_text or "")
+
+    if "." in sample and "," in sample and sample.rfind(",") > sample.rfind("."):
+        formatted = f"{total_weight_sum:,.3f}"
+        return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+
+    if "," in sample and "." not in sample:
+        return f"{total_weight_sum:.3f}".replace(".", ",")
+
+    return f"{total_weight_sum:,.3f}"
+
+
+def _get_company_font_info(page, company_name, is_english_company=False):
+    page_words = page.extract_words(keep_blank_chars=False, use_text_flow=True)
+    candidates = []
+
+    if company_name:
+        if is_english_company:
+            if company_name.get("english"):
+                candidates.append(company_name["english"])
+            if company_name.get("chinese"):
+                candidates.append(company_name["chinese"])
+        else:
+            if company_name.get("chinese"):
+                candidates.append(company_name["chinese"])
+            if company_name.get("english"):
+                candidates.append(company_name["english"])
+
+    for target_text in candidates:
+        for word in page_words:
+            if target_text and target_text in word.get("text", ""):
+                return _get_word_font_info(page, word)
+
+    return "STSong-Light", 10.0
+
+
 def _get_word_font_info(page, target_word):
     word_chars = [
         char
@@ -300,9 +382,19 @@ def _find_weight_word(page_words):
         if "毛重/净重" not in line_text:
             continue
 
-        numeric_candidates = [word for word in line_words if _is_numeric_token(word["text"])]
-        if numeric_candidates:
-            return max(numeric_candidates, key=lambda word: word["x0"])
+        for idx, word in enumerate(line_words):
+            if "毛重/净重" not in word["text"]:
+                continue
+
+            next_words = line_words[idx + 1 : idx + 4]
+            if not next_words:
+                continue
+
+            return {
+                "gross": next_words[0] if len(next_words) > 0 else None,
+                "net": next_words[1] if len(next_words) > 1 else None,
+                "unit": next_words[2] if len(next_words) > 2 else None,
+            }
     return None
 
 
@@ -345,16 +437,35 @@ def build_pdf_replacement_plan(input_pdf, hu_info):
         gross_weight_word = _find_weight_word(page_words)
         gross_weight_replacement = None
         if gross_weight_word:
-            font_name, font_size = _get_word_font_info(page, gross_weight_word)
-            gross_weight_replacement = {
-                "text": build_weight_replacement_text("520.000 /400.000 KG", hu_info.get("total_weight_sum", 0.0)),
-                "x": gross_weight_word["x0"],
-                "y": gross_weight_word["top"] - 2,
-                "width": gross_weight_word["x1"] - gross_weight_word["x0"],
-                "height": gross_weight_word["bottom"] - gross_weight_word["top"],
-                "font_size": font_size,
-                "font_name": font_name,
-            }
+            gross_word = gross_weight_word.get("gross")
+            net_word = gross_weight_word.get("net")
+            unit_word = gross_weight_word.get("unit")
+            if not gross_word:
+                gross_word = net_word
+            if not gross_word:
+                gross_word = unit_word
+            if not gross_word:
+                gross_weight_word = None
+            else:
+                font_name, font_size = _get_word_font_info(page, gross_word)
+                gross_weight_value = _format_weight_like_sample(gross_word["text"], hu_info.get("total_weight_sum", 0.0))
+                net_weight_value = net_word["text"].lstrip("/") if net_word else ""
+                unit_text = unit_word["text"] if unit_word else "KG"
+
+                if not net_weight_value:
+                    net_weight_value = "400.000"
+                if not unit_text:
+                    unit_text = "KG"
+
+                gross_weight_replacement = {
+                    "text": f"{gross_weight_value} /{net_weight_value} {unit_text}",
+                    "x": gross_word["x0"],
+                    "y": gross_word["top"] - 2,
+                    "width": (unit_word["x1"] if unit_word else gross_word["x1"]) - gross_word["x0"],
+                    "height": gross_word["bottom"] - gross_word["top"],
+                    "font_size": font_size,
+                    "font_name": font_name,
+                }
 
     return {
         "batch_replacements": batch_replacements,
@@ -427,15 +538,16 @@ def update_pdf_with_hu_info(input_pdf, output_pdf, hu_info):
 
 
 def add_contact_to_pdf(input_pdf, output_pdf, contact_info, is_english_company=False):
-    font_name = _register_pdf_font("STSong-Light")
-
     with pdfplumber.open(input_pdf) as pdf:
-        page_width = pdf.pages[0].width
-        page_height = pdf.pages[0].height
+        page = pdf.pages[0]
+        page_width = page.width
+        page_height = page.height
+        company_name = extract_company_name_from_pdf(input_pdf)
+        font_name, font_size = _get_company_font_info(page, company_name, is_english_company)
 
     packet = io.BytesIO()
     can = canvas.Canvas(packet, pagesize=(page_width, page_height))
-    can.setFont(font_name, 10)
+    can.setFont(_register_pdf_font(font_name), font_size)
     can.setFillColorRGB(0, 0, 0)
 
     y_position = 675

@@ -53,5 +53,16 @@ def test_build_pdf_replacement_plan_finds_batch_and_weight_targets():
     plan = build_pdf_replacement_plan("ZSD_DELIVERY_NOTE_SF.pdf", hu_info)
 
     assert [item["text"] for item in plan["batch_replacements"]] == ["2026050704", "2026050703"]
-    assert plan["gross_weight_replacement"]["text"] == "540.000   /400.000    KG"
+    assert plan["gross_weight_replacement"]["text"] == "540.000 /400.000 KG"
     assert plan["gross_weight_replacement"]["x"] == 394.0
+
+
+def test_build_pdf_replacement_plan_preserves_weight_style_for_other_pdf():
+    hu_info = find_hu_info_in_excel(
+        ["510767009", "510767008", "510767004", "510767002", "510740568", "510740566"],
+        "EXPORT_20260606051036.xlsx",
+    )
+
+    plan = build_pdf_replacement_plan("ZSD_DELIVERY_NOTE_SF (6)_1554.pdf", hu_info)
+
+    assert plan["gross_weight_replacement"]["text"] == "3.810,000 /3.258,000 KG"
