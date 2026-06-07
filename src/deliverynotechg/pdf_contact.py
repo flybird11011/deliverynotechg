@@ -473,9 +473,15 @@ def _register_pdf_font(font_name):
 
 def _find_batch_rows(page_words):
     rows = []
+    header_y_threshold = None
     for line in _cluster_words_by_top(page_words):
         line_words = line["words"]
-        if not any(word["text"] == "PC" for word in line_words):
+        line_text = " ".join(word["text"] for word in line_words)
+        if "批次号" in line_text and ("搬运单元" in line_text or "Top HU" in line_text or "HU" in line_text):
+            header_y_threshold = line["bottom"]
+            continue
+
+        if not any(word["text"] == "PC" for word in line_words) and header_y_threshold is None:
             continue
 
         batch_word = None
@@ -487,6 +493,9 @@ def _find_batch_rows(page_words):
                 batch_word = word
             if word["x0"] >= 100 and _is_hu_token(word["text"]) and hu_word is None:
                 hu_word = word
+
+        if header_y_threshold is not None and line["top"] <= header_y_threshold:
+            continue
 
         if batch_word and hu_word:
             rows.append({"batch_word": batch_word, "handling_unit": hu_word["text"].strip()})

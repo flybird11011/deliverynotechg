@@ -5,6 +5,7 @@ from src.deliverynotechg.pdf_contact import (
     extract_handling_units_from_pdf,
     find_hu_info_in_excel,
     _extract_total_package_count_from_pdf,
+    _find_batch_rows,
     _is_english_company_pdf,
     _pick_font_from_chars,
 )
@@ -149,6 +150,25 @@ def test_build_pdf_replacement_plan_warns_when_package_count_mismatch(caplog):
 
     assert plan["total_package_count"] == 21
     assert "搬运单元数量与总包装数不一致" in caplog.text
+
+
+def test_find_batch_rows_can_parse_rows_without_pc_marker():
+    page_words = [
+        {"text": "批次号", "x0": 19.8, "top": 455.35, "x1": 50.0, "bottom": 465.31},
+        {"text": "搬运单元", "x0": 161.34, "top": 455.35, "x1": 206.0, "bottom": 465.31},
+        {"text": "1016567", "x0": 19.8, "top": 469.87, "x1": 55.06, "bottom": 479.83},
+        {"text": "510709358", "x0": 161.54, "top": 469.87, "x1": 206.86, "bottom": 479.83},
+        {"text": "225,000", "x0": 331.66, "top": 469.87, "x1": 366.92, "bottom": 479.83},
+        {"text": "KG", "x0": 372.0, "top": 469.87, "x1": 380.0, "bottom": 479.83},
+        {"text": "225,000", "x0": 430.77, "top": 469.87, "x1": 466.02, "bottom": 479.83},
+        {"text": "KG", "x0": 471.1, "top": 469.87, "x1": 480.0, "bottom": 479.83},
+    ]
+
+    rows = _find_batch_rows(page_words)
+
+    assert len(rows) == 1
+    assert rows[0]["batch_word"]["text"] == "1016567"
+    assert rows[0]["handling_unit"] == "510709358"
 
 
 def test_is_english_company_pdf_prefers_pdf_language_over_company_name_shape():
