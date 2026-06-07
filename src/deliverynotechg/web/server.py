@@ -117,6 +117,8 @@ async def index():
     <html>
       <body>
         <h1>Delivery Note PDF Tool</h1>
+        <p><strong>提示：</strong>本程序不保存数据信息，文件会在 1 小时内自动删除。</p>
+        <p><strong>Notice:</strong> This program does not keep your data. Files will be deleted automatically within 1 hour.</p>
         <p>Excel 和 PDF 分开处理。先上传 Excel 到工作目录，再上传 PDF 生成结果。</p>
         <form id="excelForm">
           <h2>Upload Excel Files</h2>
