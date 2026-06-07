@@ -81,6 +81,41 @@ def test_build_pdf_replacement_plan_skips_weight_when_value_is_same():
     assert plan["gross_weight_replacement"] is None
 
 
+def test_build_pdf_replacement_plan_only_updates_first_page_weight():
+    hu_info = find_hu_info_in_excel(
+        [
+            "510716196",
+            "510716195",
+            "510716194",
+            "510716193",
+            "510716192",
+            "510716191",
+            "510716190",
+            "510716189",
+            "510716188",
+            "510716187",
+            "510716186",
+            "510716185",
+            "510716184",
+            "510716183",
+            "510716182",
+            "510716181",
+            "510716180",
+            "510716179",
+            "510716178",
+            "510716177",
+            "510716176",
+        ],
+        "EXPORT_20260604132137-hu.xlsx",
+    )
+
+    plan = build_pdf_replacement_plan("archive/ZSD_DELIVERY_NOTE_SF (7).pdf", hu_info)
+
+    assert len(plan["batch_replacements"]) == 21
+    assert plan["gross_weight_replacement"]["text"].endswith("KG")
+    assert plan["gross_weight_replacement"]["x"] == 394.0
+
+
 def test_build_pdf_replacement_plan_logs_when_weight_is_unchanged(caplog):
     hu_info = {
         "hu_info_list": [],
