@@ -3,6 +3,7 @@ Option Explicit
 Const BASE_URL = "https://dn.zaza.de5.net"
 Const INPUT_DIR = ".\input"
 Const OUTPUT_DIR = ".\output"
+Const ARCHIVE_DIR = ".\archive"
 Const LOG_FILE = ".\batch_upload_download.log"
 Const HU_EXCEL_NAME = "EXPORT_hu-1471.xlsx"
 Const HU_REFRESH_THRESHOLD_MINUTES = 30
@@ -36,6 +37,9 @@ End If
 
 If Not fso.FolderExists(OUTPUT_DIR) Then
     fso.CreateFolder OUTPUT_DIR
+End If
+If Not fso.FolderExists(ARCHIVE_DIR) Then
+    fso.CreateFolder ARCHIVE_DIR
 End If
 
 LogLine "Base URL: " & BASE_URL
@@ -206,12 +210,53 @@ Sub DownloadOutput(jobId, pdfPath, outputPdf)
 
     If fso.FileExists(outPath) Then
         LogLine "Saved: " & outPath
-        successCount = successCount + 1
+        If MoveOriginalPdfToArchive(pdfPath) Then
+            successCount = successCount + 1
+        Else
+            failCount = failCount + 1
+        End If
     Else
         LogLine "Download did not create a file."
         failCount = failCount + 1
     End If
 End Sub
+
+Function MoveOriginalPdfToArchive(pdfPath)
+    Dim sourcePath
+    Dim archivePath
+    Dim baseName
+    Dim attempt
+    Dim maxRetries
+
+    sourcePath = fso.GetAbsolutePathName(pdfPath)
+    baseName = fso.GetFileName(sourcePath)
+    archivePath = fso.BuildPath(ARCHIVE_DIR, baseName)
+    maxRetries = 3
+
+    For attempt = 1 To maxRetries
+        On Error Resume Next
+        If fso.FileExists(archivePath) Then
+            fso.DeleteFile archivePath, True
+        End If
+        fso.MoveFile sourcePath, archivePath
+        If Err.Number = 0 Then
+            On Error GoTo 0
+            LogLine "Moved original PDF to: " & archivePath
+            MoveOriginalPdfToArchive = True
+            Exit Function
+        End If
+
+        LogLine "Failed to move original PDF (attempt " & attempt & "): " & Err.Description
+        Err.Clear
+        On Error GoTo 0
+
+        If attempt < maxRetries Then
+            WScript.Sleep 1000
+        End If
+    Next
+
+    MoveOriginalPdfToArchive = False
+End Function
 
 Function RunScriptWithLog(label, scriptName)
     Dim scriptPath

@@ -11,7 +11,7 @@ class WebConfig:
     upload_dir: Path = Path(os.getenv("DELIVERYNOTE_WEB_UPLOAD_DIR", "web_data/uploads"))
     max_upload_size_mb: int = int(os.getenv("DELIVERYNOTE_WEB_MAX_UPLOAD_SIZE_MB", "25"))
     job_retention_hours: int = int(os.getenv("DELIVERYNOTE_WEB_JOB_RETENTION_HOURS", "24"))
-    cleanup_interval_seconds: int = int(os.getenv("DELIVERYNOTE_WEB_CLEANUP_INTERVAL_SECONDS", "300"))
+    cleanup_interval_seconds: int = int(os.getenv("DELIVERYNOTE_WEB_CLEANUP_INTERVAL_SECONDS", "86400"))
     api_token: str = os.getenv("DELIVERYNOTE_WEB_API_TOKEN", "")
 
 

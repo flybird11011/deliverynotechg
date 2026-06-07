@@ -112,7 +112,8 @@ class SQLiteJobStore:
 
         removed = []
         for index, path in enumerate(excel_files):
-            if "stock" in path.name.lower() or index < keep_last:
+            lower_name = path.name.lower()
+            if "stock" in lower_name or "customer" in lower_name or index < keep_last:
                 continue
             path.unlink(missing_ok=True)
             removed.append(str(path))
