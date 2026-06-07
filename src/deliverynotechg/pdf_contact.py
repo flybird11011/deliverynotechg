@@ -1,5 +1,7 @@
 import io
+import os
 import re
+from pathlib import Path
 
 import pandas as pd
 import pdfplumber
@@ -11,10 +13,27 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 
+_FONT_DIR = Path(os.getenv("DELIVERYNOTE_FONT_DIR", "fonts"))
 _SYSTEM_FONT_FILES = {
-    "SimHei": r"C:\Windows\Fonts\simhei.ttf",
-    "NSimSun": r"C:\Windows\Fonts\simsun.ttc",
-    "SimSun": r"C:\Windows\Fonts\simsun.ttc",
+    "SimHei": [
+        _FONT_DIR / "SimHei.ttf",
+        _FONT_DIR / "simhei.ttf",
+        Path(r"C:\Windows\Fonts\simhei.ttf"),
+    ],
+    "NSimSun": [
+        _FONT_DIR / "NSimSun.ttc",
+        _FONT_DIR / "NSimSun.ttf",
+        _FONT_DIR / "simsun.ttc",
+        _FONT_DIR / "simsun.ttf",
+        Path(r"C:\Windows\Fonts\simsun.ttc"),
+    ],
+    "SimSun": [
+        _FONT_DIR / "SimSun.ttc",
+        _FONT_DIR / "SimSun.ttf",
+        _FONT_DIR / "simsun.ttc",
+        _FONT_DIR / "simsun.ttf",
+        Path(r"C:\Windows\Fonts\simsun.ttc"),
+    ],
 }
 
 
@@ -411,14 +430,21 @@ def _register_pdf_font(font_name):
             pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
             return "STSong-Light"
         if font_name not in pdfmetrics.getRegisteredFontNames():
-            font_file = _SYSTEM_FONT_FILES.get(font_name, f"{font_name}.ttf")
-            if font_file.lower().endswith(".ttc"):
-                pdfmetrics.registerFont(TTFont(font_name, font_file, fontNumber=0))
-            else:
-                pdfmetrics.registerFont(TTFont(font_name, font_file))
+            font_candidates = _SYSTEM_FONT_FILES.get(font_name, [Path(f"{font_name}.ttf")])
+            for font_file in font_candidates:
+                if not Path(font_file).exists():
+                    continue
+                if str(font_file).lower().endswith(".ttc"):
+                    pdfmetrics.registerFont(TTFont(font_name, str(font_file), fontNumber=0))
+                else:
+                    pdfmetrics.registerFont(TTFont(font_name, str(font_file)))
+                return font_name
+            return "STSong-Light"
         return font_name
     except Exception:
-        return "Helvetica"
+        # If the requested font is unavailable in the Linux container, fall back
+        # to a Unicode CID font so Chinese text still renders correctly.
+        return "STSong-Light"
 
 
 def _find_batch_rows(page_words):

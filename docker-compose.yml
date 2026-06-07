@@ -11,7 +11,9 @@ services:
       DELIVERYNOTE_WEB_BASE_DIR: /data/web_data
       DELIVERYNOTE_WEB_DB_PATH: /data/web_data/jobs.db
       DELIVERYNOTE_WEB_UPLOAD_DIR: /data/web_data/uploads
+      DELIVERYNOTE_FONT_DIR: /app/fonts
     volumes:
       - ./data:/data
+      - ./fonts:/app/fonts:ro
     ports:
       - "127.0.0.1:9000:8000"
