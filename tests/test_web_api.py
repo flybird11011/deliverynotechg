@@ -12,6 +12,9 @@ def test_index_page_loads():
 
     assert resp.status_code == 200
     assert "Delivery Note PDF Tool" in resp.text
+    assert 'id="apiKey"' in resp.text
+    assert "Save Excel Files" in resp.text
+    assert "Process PDF" in resp.text
 
 
 def test_process_job_returns_job_id():

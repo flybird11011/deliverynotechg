@@ -179,6 +179,7 @@ async def index():
           <div id="jobLinks"></div>
         </div>
         <script>
+          const API_KEY_STORAGE_KEY = 'deliverynote_api_key';
           const apiKeyInput = document.getElementById('apiKey');
           const excelForm = document.getElementById('excelForm');
           const pdfForm = document.getElementById('pdfForm');
@@ -189,9 +190,19 @@ async def index():
           const jobLinks = document.getElementById('jobLinks');
           let currentJobIds = [];
 
+          apiKeyInput.value = localStorage.getItem(API_KEY_STORAGE_KEY) || '';
+          apiKeyInput.addEventListener('change', () => {
+            localStorage.setItem(API_KEY_STORAGE_KEY, apiKeyInput.value.trim());
+          });
+
+          function getApiKeyHeaders() {
+            const apiKey = apiKeyInput.value.trim();
+            return apiKey ? { 'X-API-Key': apiKey } : {};
+          }
+
           async function refreshExcelList() {
             const resp = await fetch('/api/excels', {
-              headers: { 'X-API-Key': apiKeyInput.value },
+              headers: getApiKeyHeaders(),
             });
             const data = await resp.json();
             const files = data.files || [];
@@ -206,7 +217,7 @@ async def index():
             }
             const resp = await fetch('/api/excels', {
               method: 'POST',
-              headers: { 'X-API-Key': apiKeyInput.value },
+              headers: getApiKeyHeaders(),
               body: data,
             });
             if (!resp.ok) {
@@ -219,7 +230,7 @@ async def index():
 
           async function loadJob(jobId) {
             const resp = await fetch(`/api/jobs/${jobId}`, {
-              headers: { 'X-API-Key': apiKeyInput.value },
+              headers: getApiKeyHeaders(),
             });
             if (!resp.ok) {
               return null;
@@ -290,7 +301,7 @@ async def index():
             }
             const resp = await fetch('/api/process', {
               method: 'POST',
-              headers: { 'X-API-Key': apiKeyInput.value },
+              headers: getApiKeyHeaders(),
               body: data,
             });
             if (!resp.ok) {
@@ -319,10 +330,10 @@ async def index():
 async def list_excels(x_api_key: str | None = Header(default=None, alias="X-API-Key")):
     _require_api_key(x_api_key)
     files = _list_excel_files()
-    customer_path = _get_customer_excel_path()
+    customer_paths = _get_customer_excel_paths()
     return {
         "files": [path.name for path in files],
-        "customer_excel": customer_path.name if customer_path else "",
+        "customer_excels": [path.name for path in customer_paths],
     }
 
 
