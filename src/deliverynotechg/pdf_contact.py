@@ -135,33 +135,41 @@ def extract_company_name_from_pdf(pdf_path):
 
 
 def find_contact_in_excel(company_name, excel_path):
+    return find_contact_in_excels(company_name, [excel_path] if excel_path else [])
+
+
+def find_contact_in_excels(company_name, excel_paths):
     if not company_name:
         return None
 
-    df = pd.read_excel(excel_path)
     chinese_name_pdf = _normalize_company_text(company_name.get("chinese"))
     english_name_pdf = _normalize_company_text(company_name.get("english"))
 
-    for _, row in df.iterrows():
-        chinese_name_excel = _normalize_company_text(row.get("chinese_name"))
-        english_name_excel = _normalize_company_text(row.get("english_name"))
+    for excel_path in excel_paths:
+        if not excel_path or not os.path.exists(excel_path):
+            continue
 
-        match_found = False
-        if chinese_name_pdf and chinese_name_excel:
-            if chinese_name_pdf in chinese_name_excel or chinese_name_excel in chinese_name_pdf:
-                match_found = True
-        if not match_found and english_name_pdf and english_name_excel:
-            if english_name_pdf in english_name_excel or english_name_excel in english_name_pdf:
-                match_found = True
+        df = pd.read_excel(excel_path)
+        for _, row in df.iterrows():
+            chinese_name_excel = _normalize_company_text(row.get("chinese_name"))
+            english_name_excel = _normalize_company_text(row.get("english_name"))
 
-        if match_found:
-            mobile = str(row["mobile"]) if pd.notna(row["mobile"]) else ""
-            if mobile.endswith(".0"):
-                mobile = mobile[:-2]
-            return {
-                "contact": row["contact"] if pd.notna(row["contact"]) else "",
-                "mobile": mobile,
-            }
+            match_found = False
+            if chinese_name_pdf and chinese_name_excel:
+                if chinese_name_pdf in chinese_name_excel or chinese_name_excel in chinese_name_pdf:
+                    match_found = True
+            if not match_found and english_name_pdf and english_name_excel:
+                if english_name_pdf in english_name_excel or english_name_excel in english_name_pdf:
+                    match_found = True
+
+            if match_found:
+                mobile = str(row["mobile"]) if pd.notna(row["mobile"]) else ""
+                if mobile.endswith(".0"):
+                    mobile = mobile[:-2]
+                return {
+                    "contact": row["contact"] if pd.notna(row["contact"]) else "",
+                    "mobile": mobile,
+                }
 
     return None
 

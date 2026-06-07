@@ -27,17 +27,19 @@ def _list_excel_files():
     )
 
 
-def _get_customer_excel_path():
-    customer_path = config.excel_dir / "customer_combined.xlsx"
-    if customer_path.exists():
-        return customer_path
+def _get_customer_excel_paths():
+    preferred_names = {"customer_combined.xlsx", "customer_combined-ge.xlsx"}
 
     excel_files = _list_excel_files()
-    for path in excel_files:
-        if not path.name.lower().startswith("export_"):
-            return path
+    customer_paths = [
+        path
+        for path in excel_files
+        if path.name.lower() in preferred_names
+    ]
+    if customer_paths:
+        return customer_paths
 
-    return None
+    return []
 
 
 def _get_export_excel_paths():
@@ -81,12 +83,12 @@ def _require_api_key(x_api_key: str | None):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-def _run_job(job_id: str, pdf_path: Path, excel_path: Path, export_excel_paths: list[Path], job_dir: Path):
+def _run_job(job_id: str, pdf_path: Path, excel_paths: list[Path], export_excel_paths: list[Path], job_dir: Path):
     store.update_status(job_id, "processing")
     result = process_uploaded_pdf_job(
         job_id=job_id,
         pdf_path=str(pdf_path),
-        customer_excel_path=str(excel_path),
+        customer_excel_paths=[str(path) for path in excel_paths],
         export_excel_paths=[str(path) for path in export_excel_paths],
         job_dir=str(job_dir),
     )
@@ -96,8 +98,10 @@ def _run_job(job_id: str, pdf_path: Path, excel_path: Path, export_excel_paths: 
         store.update_status(job_id, "failed", error_message=result["error_message"])
 
 
-def _queue_pdf_job(pdf: UploadFile, customer_excel_path: Path | None, export_excel_paths: list[Path]):
-    original_excel_name = customer_excel_path.name if customer_excel_path else ""
+def _queue_pdf_job(pdf: UploadFile, customer_excel_paths: list[Path], export_excel_paths: list[Path]):
+    original_excel_name = customer_excel_paths[0].name if customer_excel_paths else ""
+    if len(customer_excel_paths) > 1:
+        original_excel_name = ", ".join(path.name for path in customer_excel_paths)
     if not original_excel_name and export_excel_paths:
         original_excel_name = ", ".join(path.name for path in export_excel_paths)
     if not original_excel_name:
@@ -108,10 +112,10 @@ def _queue_pdf_job(pdf: UploadFile, customer_excel_path: Path | None, export_exc
     job_dir.mkdir(parents=True, exist_ok=True)
 
     pdf_path = _save_upload(pdf, job_dir / "input.pdf")
-    excel_path = customer_excel_path if customer_excel_path else Path("customer_combined.xlsx")
+    excel_paths = customer_excel_paths if customer_excel_paths else [Path("customer_combined.xlsx"), Path("customer_combined-ge.xlsx")]
     worker = threading.Thread(
         target=_run_job,
-        args=(job.job_id, pdf_path, excel_path, export_excel_paths, job_dir),
+        args=(job.job_id, pdf_path, excel_paths, export_excel_paths, job_dir),
         daemon=True,
     )
     worker.start()
@@ -363,13 +367,13 @@ async def process_job(
         _validate_upload(upload, ".pdf")
         _validate_upload_size(upload)
 
-    customer_excel_path = _get_customer_excel_path()
+    customer_excel_paths = _get_customer_excel_paths()
     export_excel_paths = _get_export_excel_paths()
-    jobs = [_queue_pdf_job(upload, customer_excel_path, export_excel_paths) for upload in uploads]
+    jobs = [_queue_pdf_job(upload, customer_excel_paths, export_excel_paths) for upload in uploads]
 
     return {
         "jobs": jobs,
-        "customer_excel": customer_excel_path.name if customer_excel_path else "",
+        "customer_excels": [path.name for path in customer_excel_paths],
         "export_excels": [path.name for path in export_excel_paths],
     }
 

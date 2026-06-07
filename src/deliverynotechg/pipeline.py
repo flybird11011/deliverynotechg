@@ -6,6 +6,11 @@ from pathlib import Path
 
 from .customer_excel import create_customer_excel
 from .job_runner import _find_hu_info_from_exports, process_uploaded_pdf_job
+from .pdf_contact import (
+    extract_company_name_from_pdf,
+    extract_handling_units_from_pdf,
+    find_contact_in_excels,
+)
 
 
 def _configure_stdout():
@@ -25,7 +30,7 @@ def _find_export_excel_candidates(directory="."):
 
 
 def process_pdf_files():
-    excel_path = "customer_combined.xlsx"
+    customer_excel_paths = ["customer_combined.xlsx", "customer_combined-ge.xlsx"]
     hu_excel_paths = _find_export_excel_candidates(".")
 
     os.makedirs("output", exist_ok=True)
@@ -45,27 +50,25 @@ def process_pdf_files():
         print(f"\n处理文件: {pdf_path}")
 
         try:
-            from .pdf_contact import extract_company_name_from_pdf, extract_handling_units_from_pdf, find_contact_in_excel
-
             company_name = extract_company_name_from_pdf(pdf_path)
             if company_name:
                 if company_name.get("chinese"):
-                    print(f"从 PDF 提取的中文公司名: {company_name['chinese']}")
+                    print(f"从PDF提取的中文公司名: {company_name['chinese']}")
                 if company_name.get("english"):
-                    print(f"从 PDF 提取的英文公司名: {company_name['english']}")
+                    print(f"从PDF提取的英文公司名: {company_name['english']}")
             else:
                 print("未从 PDF 提取到公司名称")
 
-            contact_info = find_contact_in_excel(company_name, excel_path)
+            contact_info = find_contact_in_excels(company_name, customer_excel_paths)
             handling_units = extract_handling_units_from_pdf(pdf_path)
-            print(f"从 PDF 提取的搬运单元号: {handling_units}")
+            print(f"从PDF提取的搬运单元号: {handling_units}")
 
             hu_info = None
             if handling_units and hu_excel_paths:
                 hu_info, matched_hu_excel = _find_hu_info_from_exports(handling_units, hu_excel_paths)
                 if hu_info:
-                    print(f"匹配成功的 HU Excel: {os.path.basename(matched_hu_excel)}")
-                    print(f"匹配到的 HU 记录数: {len(hu_info.get('hu_info_list', []))}")
+                    print(f"匹配成功的HU Excel: {os.path.basename(matched_hu_excel)}")
+                    print(f"匹配到的 HU 记录数 {len(hu_info.get('hu_info_list', []))}")
                     print(f"Total Weight 求和: {hu_info.get('total_weight_sum', 0.0)}")
                 else:
                     print("未找到能完整匹配当前搬运单元号的 EXPORT_*.xlsx 文件")
@@ -80,7 +83,7 @@ def process_pdf_files():
             job_result = process_uploaded_pdf_job(
                 job_id=name_without_ext,
                 pdf_path=pdf_path,
-                customer_excel_path=excel_path,
+                customer_excel_paths=customer_excel_paths,
                 export_excel_paths=hu_excel_paths,
                 job_dir=str(job_dir),
             )
@@ -95,7 +98,7 @@ def process_pdf_files():
             for i in range(max_retries):
                 try:
                     shutil.move(pdf_path, archive_path)
-                    print(f"已将原 PDF 移动到: {archive_path}")
+                    print(f"已将原PDF移动到 {archive_path}")
                     break
                 except PermissionError:
                     if i < max_retries - 1:

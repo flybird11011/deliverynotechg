@@ -6,7 +6,7 @@ from .pdf_contact import (
     add_contact_to_pdf,
     extract_company_name_from_pdf,
     extract_handling_units_from_pdf,
-    find_contact_in_excel,
+    find_contact_in_excels,
     find_hu_info_in_excel,
     _is_english_company_pdf,
     update_pdf_with_hu_info,
@@ -39,7 +39,7 @@ def _find_hu_info_from_exports(handling_units, export_excel_paths):
 def process_uploaded_pdf_job(
     job_id,
     pdf_path,
-    customer_excel_path,
+    customer_excel_paths,
     export_excel_paths,
     job_dir,
 ):
@@ -56,8 +56,8 @@ def process_uploaded_pdf_job(
     try:
         company_name = extract_company_name_from_pdf(pdf_path)
         contact_info = None
-        if customer_excel_path and os.path.exists(customer_excel_path):
-            contact_info = find_contact_in_excel(company_name, customer_excel_path)
+        if customer_excel_paths:
+            contact_info = find_contact_in_excels(company_name, customer_excel_paths)
         handling_units = extract_handling_units_from_pdf(pdf_path)
         hu_info, _ = _find_hu_info_from_exports(handling_units, export_excel_paths)
 
