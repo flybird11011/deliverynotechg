@@ -323,6 +323,10 @@ def _format_weight_like_sample(sample_text, total_weight_sum):
     return f"{total_weight_sum:,.3f}"
 
 
+def _is_same_weight_value(original_text, formatted_text):
+    return _normalize_weight_token(original_text) == _normalize_weight_token(formatted_text)
+
+
 def _get_company_font_info(page, company_name, is_english_company=False):
     page_words = page.extract_words(keep_blank_chars=False, use_text_flow=True)
     candidates = []
@@ -543,23 +547,24 @@ def build_pdf_replacement_plan(input_pdf, hu_info):
             else:
                 font_name, font_size = _get_word_font_info(page, gross_word)
                 gross_weight_value = _format_weight_like_sample(gross_word["text"], hu_info.get("total_weight_sum", 0.0))
-                net_weight_value = net_word["text"].lstrip("/") if net_word else ""
-                unit_text = unit_word["text"] if unit_word else "KG"
+                if not _is_same_weight_value(gross_word["text"], gross_weight_value):
+                    net_weight_value = net_word["text"].lstrip("/") if net_word else ""
+                    unit_text = unit_word["text"] if unit_word else "KG"
 
-                if not net_weight_value:
-                    net_weight_value = "400.000"
-                if not unit_text:
-                    unit_text = "KG"
+                    if not net_weight_value:
+                        net_weight_value = "400.000"
+                    if not unit_text:
+                        unit_text = "KG"
 
-                gross_weight_replacement = {
-                    "text": f"{gross_weight_value} /{net_weight_value} {unit_text}",
-                    "x": gross_word["x0"],
-                    "y": gross_word["top"] - 2,
-                    "width": (unit_word["x1"] if unit_word else gross_word["x1"]) - gross_word["x0"],
-                    "height": gross_word["bottom"] - gross_word["top"],
-                    "font_size": font_size,
-                    "font_name": font_name,
-                }
+                    gross_weight_replacement = {
+                        "text": f"{gross_weight_value} /{net_weight_value} {unit_text}",
+                        "x": gross_word["x0"],
+                        "y": gross_word["top"] - 2,
+                        "width": (unit_word["x1"] if unit_word else gross_word["x1"]) - gross_word["x0"],
+                        "height": gross_word["bottom"] - gross_word["top"],
+                        "font_size": font_size,
+                        "font_name": font_name,
+                    }
 
     return {
         "batch_replacements": batch_replacements,

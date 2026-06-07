@@ -65,14 +65,25 @@ def test_build_pdf_replacement_plan_preserves_weight_style_for_other_pdf():
         "EXPORT_20260606051036.xlsx",
     )
 
-    plan = build_pdf_replacement_plan("archive/ZSD_DELIVERY_NOTE_SF (6)_1554_1711.pdf", hu_info)
+    plan = build_pdf_replacement_plan("archive/ZSD_DELIVERY_NOTE_SF (6)_2259.pdf", hu_info)
 
     assert plan["gross_weight_replacement"]["text"] == "3.810,000 /3.258,000 KG"
 
 
+def test_build_pdf_replacement_plan_skips_weight_when_value_is_same():
+    hu_info = {
+        "hu_info_list": [],
+        "total_weight_sum": 3840.0,
+    }
+
+    plan = build_pdf_replacement_plan("archive/ZSD_DELIVERY_NOTE_SF (6)_2259.pdf", hu_info)
+
+    assert plan["gross_weight_replacement"] is None
+
+
 def test_is_english_company_pdf_prefers_pdf_language_over_company_name_shape():
     assert _is_english_company_pdf("archive/dn_0626_0639_0644.pdf") is True
-    assert _is_english_company_pdf("archive/ZSD_DELIVERY_NOTE_SF (6)_1554_1711.pdf") is False
+    assert _is_english_company_pdf("archive/ZSD_DELIVERY_NOTE_SF (6)_2259.pdf") is False
 
 
 def test_pick_font_from_chars_prefers_main_chinese_font_and_brackets_font():
