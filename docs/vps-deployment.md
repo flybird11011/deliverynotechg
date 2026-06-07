@@ -65,7 +65,7 @@ sudo mkdir -p /opt/dn-change/data/archive
 cd /opt/dn-change
 git status
 git pull origin feature/web-portal
-sudo docker compose up -d --build
+sudo docker-compose up -d --build
 ```
 
 
@@ -168,7 +168,7 @@ sudo systemctl reload nginx
 ### 1. 确认后端容器在跑
 
 ```bash
-sudo docker compose ps
+sudo docker-compose ps
 ```
 
 你应该能看到容器状态是 `Up`。
@@ -255,5 +255,5 @@ sudo ss -ltnp | grep :9000
 ## 回滚方式
 
 - 回滚代码：切回上一个 git commit
-- 回滚镜像：`sudo docker compose down` 后重新 `up -d --build`
+- 回滚镜像：`sudo docker-compose down` 后重新 `up -d --build`
 - 回滚数据：因为数据挂载在宿主机，容器重建不会影响历史文件
