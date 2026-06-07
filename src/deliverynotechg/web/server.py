@@ -124,13 +124,13 @@ async def index():
           <h2>Upload Excel Files</h2>
           <div><label>API Key <input type="password" id="apiKey" /></label></div>
           <div><label>Excel files <input type="file" name="excels" accept=".xlsx" multiple /></label></div>
-          <button type="submit">Save Excel Files</button>
+          <button type="button" id="saveExcelBtn">Save Excel Files</button>
         </form>
         <hr />
         <form id="pdfForm">
           <h2>Process PDF</h2>
           <div><label>PDF file <input type="file" name="pdf" accept=".pdf" /></label></div>
-          <button type="submit">Process PDF</button>
+          <button type="button" id="processPdfBtn">Process PDF</button>
         </form>
         <hr />
         <div>
@@ -147,6 +147,8 @@ async def index():
           const apiKeyInput = document.getElementById('apiKey');
           const excelForm = document.getElementById('excelForm');
           const pdfForm = document.getElementById('pdfForm');
+          const saveExcelBtn = document.getElementById('saveExcelBtn');
+          const processPdfBtn = document.getElementById('processPdfBtn');
           const excelList = document.getElementById('excelList');
           const jobStatus = document.getElementById('jobStatus');
           const downloadLink = document.getElementById('downloadLink');
@@ -161,8 +163,7 @@ async def index():
             excelList.textContent = files.length ? files.join('\n') : '(no excel files uploaded)';
           }
 
-          excelForm.addEventListener('submit', async (event) => {
-            event.preventDefault();
+          saveExcelBtn.addEventListener('click', async () => {
             const data = new FormData();
             const files = excelForm.querySelector('input[name="excels"]').files;
             for (const file of files) {
@@ -205,8 +206,7 @@ async def index():
             return false;
           }
 
-          pdfForm.addEventListener('submit', async (event) => {
-            event.preventDefault();
+          processPdfBtn.addEventListener('click', async () => {
             const pdfInput = pdfForm.querySelector('input[name="pdf"]');
             if (!pdfInput.files.length) {
               alert('Please choose a PDF file first');
