@@ -117,20 +117,47 @@ async def index():
     <html>
       <body>
         <h1>Delivery Note PDF Tool</h1>
+        <p>Excel 和 PDF 分开处理。先上传 Excel 到工作目录，再上传 PDF 生成结果。</p>
         <form id="excelForm">
+          <h2>Upload Excel Files</h2>
           <div><label>API Key <input type="password" id="apiKey" /></label></div>
-          <div><label>Excel <input type="file" name="excels" accept=".xlsx" multiple /></label></div>
-          <button type="submit">Upload Excel</button>
+          <div><label>Excel files <input type="file" name="excels" accept=".xlsx" multiple /></label></div>
+          <button type="submit">Save Excel Files</button>
         </form>
         <hr />
         <form id="pdfForm">
-          <div><label>PDF <input type="file" name="pdf" accept=".pdf" /></label></div>
+          <h2>Process PDF</h2>
+          <div><label>PDF file <input type="file" name="pdf" accept=".pdf" /></label></div>
           <button type="submit">Process PDF</button>
         </form>
+        <hr />
+        <div>
+          <h2>Excel files in workspace</h2>
+          <pre id="excelList">Loading...</pre>
+        </div>
+        <hr />
+        <div>
+          <h2>Job status</h2>
+          <pre id="jobStatus">No job started yet.</pre>
+          <a id="downloadLink" href="#" style="display:none;" target="_blank" rel="noopener">Download Output PDF</a>
+        </div>
         <script>
           const apiKeyInput = document.getElementById('apiKey');
           const excelForm = document.getElementById('excelForm');
           const pdfForm = document.getElementById('pdfForm');
+          const excelList = document.getElementById('excelList');
+          const jobStatus = document.getElementById('jobStatus');
+          const downloadLink = document.getElementById('downloadLink');
+          let currentJobId = '';
+
+          async function refreshExcelList() {
+            const resp = await fetch('/api/excels', {
+              headers: { 'X-API-Key': apiKeyInput.value },
+            });
+            const data = await resp.json();
+            const files = data.files || [];
+            excelList.textContent = files.length ? files.join('\n') : '(no excel files uploaded)';
+          }
 
           excelForm.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -144,19 +171,76 @@ async def index():
               headers: { 'X-API-Key': apiKeyInput.value },
               body: data,
             });
-            alert(await resp.text());
+            if (!resp.ok) {
+              alert(await resp.text());
+              return;
+            }
+            await refreshExcelList();
+            alert('Excel files saved');
           });
+
+          async function refreshJobStatus(jobId) {
+            const resp = await fetch(`/api/jobs/${jobId}`, {
+              headers: { 'X-API-Key': apiKeyInput.value },
+            });
+            if (!resp.ok) {
+              jobStatus.textContent = `Failed to load job status for ${jobId}`;
+              return false;
+            }
+            const data = await resp.json();
+            jobStatus.textContent = JSON.stringify(data, null, 2);
+            if (data.status === 'done' && data.output_pdf) {
+              downloadLink.href = `/api/jobs/${jobId}/download`;
+              downloadLink.style.display = 'inline-block';
+              downloadLink.textContent = 'Download Output PDF';
+              return true;
+            }
+            if (data.status === 'failed') {
+              downloadLink.style.display = 'none';
+              return true;
+            }
+            downloadLink.style.display = 'none';
+            return false;
+          }
 
           pdfForm.addEventListener('submit', async (event) => {
             event.preventDefault();
+            const pdfInput = pdfForm.querySelector('input[name="pdf"]');
+            if (!pdfInput.files.length) {
+              alert('Please choose a PDF file first');
+              return;
+            }
             const data = new FormData();
-            data.append('pdf', pdfForm.querySelector('input[name="pdf"]').files[0]);
+            data.append('pdf', pdfInput.files[0]);
             const resp = await fetch('/api/process', {
               method: 'POST',
               headers: { 'X-API-Key': apiKeyInput.value },
               body: data,
             });
-            alert(await resp.text());
+            if (!resp.ok) {
+              alert(await resp.text());
+              return;
+            }
+            const result = await resp.json();
+            currentJobId = result.job_id;
+            jobStatus.textContent = JSON.stringify(result, null, 2);
+            downloadLink.style.display = 'none';
+            alert(`Job queued: ${result.job_id}`);
+
+            const poll = async () => {
+              if (!currentJobId) {
+                return;
+              }
+              const done = await refreshJobStatus(currentJobId);
+              if (!done) {
+                setTimeout(poll, 2000);
+              }
+            };
+            setTimeout(poll, 1000);
+          });
+
+          refreshExcelList().catch(() => {
+            excelList.textContent = '(failed to load excel list)';
           });
         </script>
       </body>
@@ -234,6 +318,7 @@ async def process_job(
         "status": "queued",
         "output_pdf": "",
         "error_message": "",
+        "download_url": f"/api/jobs/{job.job_id}/download",
         "customer_excel": customer_excel_path.name if customer_excel_path else "",
         "export_excels": [path.name for path in export_excel_paths],
     }

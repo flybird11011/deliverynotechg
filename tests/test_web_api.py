@@ -88,7 +88,6 @@ def test_rejects_empty_uploads():
     resp = client.post(
         "/api/process",
         files={
-            "excel": ("empty.xlsx", b"", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
             "pdf": ("empty.pdf", b"", "application/pdf"),
         },
     )
@@ -113,7 +112,6 @@ def test_rejects_large_uploads(monkeypatch):
     resp = client.post(
         "/api/process",
         files={
-            "excel": ("input.xlsx", b"1234", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
             "pdf": ("input.pdf", b"1234", "application/pdf"),
         },
     )
