@@ -34,15 +34,15 @@ def process_pdf_files():
     pdf_files = [f for f in os.listdir(".") if f.lower().endswith(".pdf")]
 
     if not pdf_files:
-        print("褰撳墠鐩綍娌℃湁 PDF 鏂囦欢")
+        print("当前目录没有 PDF 文件")
         return
 
-    print(f"鎵惧埌 {len(pdf_files)} 涓?PDF 鏂囦欢")
+    print(f"找到 {len(pdf_files)} 个 PDF 文件")
     time_suffix = time.strftime("%H%M")
 
     for pdf_filename in pdf_files:
         pdf_path = pdf_filename
-        print(f"\n澶勭悊鏂囦欢: {pdf_path}")
+        print(f"\n处理文件: {pdf_path}")
 
         try:
             from .pdf_contact import extract_company_name_from_pdf, extract_handling_units_from_pdf, find_contact_in_excel
@@ -50,27 +50,27 @@ def process_pdf_files():
             company_name = extract_company_name_from_pdf(pdf_path)
             if company_name:
                 if company_name.get("chinese"):
-                    print(f"浠?PDF 鎻愬彇鐨勪腑鏂囧叕鍙稿悕: {company_name['chinese']}")
+                    print(f"从 PDF 提取的中文公司名: {company_name['chinese']}")
                 if company_name.get("english"):
-                    print(f"浠?PDF 鎻愬彇鐨勮嫳鏂囧叕鍙稿悕: {company_name['english']}")
+                    print(f"从 PDF 提取的英文公司名: {company_name['english']}")
             else:
-                print("鏈粠 PDF 鎻愬彇鍒板叕鍙稿悕绉?")
+                print("未从 PDF 提取到公司名称")
 
             contact_info = find_contact_in_excel(company_name, excel_path)
             handling_units = extract_handling_units_from_pdf(pdf_path)
-            print(f"浠?PDF 鎻愬彇鐨勬惉杩愬崟鍏冨彿: {handling_units}")
+            print(f"从 PDF 提取的搬运单元号: {handling_units}")
 
             hu_info = None
             if handling_units and hu_excel_paths:
                 hu_info, matched_hu_excel = _find_hu_info_from_exports(handling_units, hu_excel_paths)
                 if hu_info:
-                    print(f"鍖归厤鎴愬姛鐨?HU Excel: {os.path.basename(matched_hu_excel)}")
-                    print(f"鍖归厤鍒扮殑 HU 璁板綍鏁? {len(hu_info.get('hu_info_list', []))}")
-                    print(f"Total Weight 姹傚拰: {hu_info.get('total_weight_sum', 0.0)}")
+                    print(f"匹配成功的 HU Excel: {os.path.basename(matched_hu_excel)}")
+                    print(f"匹配到的 HU 记录数: {len(hu_info.get('hu_info_list', []))}")
+                    print(f"Total Weight 求和: {hu_info.get('total_weight_sum', 0.0)}")
                 else:
-                    print("鏈壘鍒拌兘瀹屾暣鍖归厤褰撳墠鎼繍鍗曞厓鍙风殑 EXPORT_*.xlsx 鏂囦欢")
+                    print("未找到能完整匹配当前搬运单元号的 EXPORT_*.xlsx 文件")
             elif handling_units and not hu_excel_paths:
-                print("鏈壘鍒颁换浣?EXPORT_*.xlsx 鏂囦欢")
+                print("未找到任何 EXPORT_*.xlsx 文件")
 
             name_without_ext = os.path.splitext(pdf_filename)[0]
             output_dir = Path("output")
@@ -86,25 +86,25 @@ def process_pdf_files():
             )
 
             if job_result["status"] == "done":
-                print(f"宸蹭繚瀛樻柊鏂囦欢: {job_result['output_pdf']}")
+                print(f"已保存新文件: {job_result['output_pdf']}")
             else:
-                print(f"澶勭悊澶辫触: {job_result['error_message']}")
+                print(f"处理失败: {job_result['error_message']}")
 
             archive_path = f"archive/{name_without_ext}_{time_suffix}.pdf"
             max_retries = 3
             for i in range(max_retries):
                 try:
                     shutil.move(pdf_path, archive_path)
-                    print(f"宸插皢鍘?PDF 绉诲姩鍒? {archive_path}")
+                    print(f"已将原 PDF 移动到: {archive_path}")
                     break
                 except PermissionError:
                     if i < max_retries - 1:
                         time.sleep(1)
-                        print(f"鏂囦欢琚崰鐢紝閲嶈瘯涓?({i + 1}/{max_retries})...")
+                        print(f"文件被占用，重试中 ({i + 1}/{max_retries})...")
                     else:
-                        print(f"鏃犳硶绉诲姩鏂囦欢 {pdf_path}锛屽彲鑳借鍏朵粬绋嬪簭鍗犵敤")
+                        print(f"无法移动文件 {pdf_path}，可能被其他程序占用")
         except Exception as e:
-            print(f"澶勭悊鏂囦欢 {pdf_path} 鏃跺彂鐢熼敊璇? {str(e)}")
+            print(f"处理文件 {pdf_path} 时发生错误: {str(e)}")
 
 
 def main():
@@ -113,12 +113,12 @@ def main():
     excel_file = "customer_combined.xlsx"
 
     if not os.path.exists(excel_file):
-        print(f"{excel_file} 涓嶅瓨鍦紝姝ｅ湪鍒涘缓...")
+        print(f"{excel_file} 不存在，正在创建...")
         create_customer_excel()
-        print(f"{excel_file} 鍒涘缓瀹屾垚")
+        print(f"{excel_file} 创建完成")
     else:
-        print(f"{excel_file} 宸插瓨鍦紝璺宠繃鍒涘缓")
+        print(f"{excel_file} 已存在，跳过创建")
 
-    print("\n姝ｅ湪澶勭悊 PDF 鏂囦欢...")
+    print("\n正在处理 PDF 文件...")
     process_pdf_files()
-    print("\n瀹屾垚")
+    print("\n完成")

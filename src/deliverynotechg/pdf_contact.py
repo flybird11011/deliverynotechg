@@ -191,6 +191,22 @@ def extract_handling_units_from_pdf(pdf_path):
                         break
 
     return handling_units
+def _extract_total_package_count_from_pdf(pdf_path):
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            words = page.extract_words(keep_blank_chars=False, use_text_flow=True)
+            for line in _cluster_words_by_top(words):
+                line_text = " ".join(word["text"] for word in line["words"])
+                if "总包装数:" not in line_text and "总包装数" not in line_text:
+                    continue
+                for idx, word in enumerate(line["words"]):
+                    if word["text"].startswith("总包装数"):
+                        for next_word in line["words"][idx + 1:]:
+                            if next_word["text"].isdigit():
+                                return int(next_word["text"])
+    return None
+
+
 
 
 def _get_value_from_row(row, candidates):
@@ -508,37 +524,45 @@ def build_pdf_replacement_plan(input_pdf, hu_info):
         if item.get("handling_unit")
     }
 
-    with pdfplumber.open(input_pdf) as pdf:
-        page = pdf.pages[0]
-        page_words = page.extract_words(keep_blank_chars=False, use_text_flow=True)
+    total_package_count = _extract_total_package_count_from_pdf(input_pdf)
+    batch_replacements = []
+    gross_weight_replacement = None
 
-        batch_replacements = []
-        for row in _find_batch_rows(page_words):
-            matched_info = hu_map.get(row["handling_unit"])
-            if not matched_info:
+    with pdfplumber.open(input_pdf) as pdf:
+        for page_index, page in enumerate(pdf.pages):
+            page_words = page.extract_words(keep_blank_chars=False, use_text_flow=True)
+
+            for row in _find_batch_rows(page_words):
+                matched_info = hu_map.get(row["handling_unit"])
+                if not matched_info:
+                    continue
+
+                font_name, font_size = _get_word_font_info(page, row["batch_word"])
+                batch_x = row["batch_word"]["x0"]
+                batch_y = row["batch_word"]["top"]
+                if batch_x < 100 and batch_y > 450:
+                    batch_y -= 2
+                batch_replacements.append(
+                    {
+                        "page_index": page_index,
+                        "text": matched_info.get("batch_number") or matched_info.get("hu_identification_2", ""),
+                        "x": batch_x,
+                        "y": batch_y,
+                        "width": row["batch_word"]["x1"] - row["batch_word"]["x0"],
+                        "height": row["batch_word"]["bottom"] - row["batch_word"]["top"],
+                        "font_size": font_size,
+                        "font_name": font_name,
+                        "raw_width": row["batch_word"]["x1"] - row["batch_word"]["x0"],
+                    }
+                )
+
+            if page_index != 0 or gross_weight_replacement is not None:
                 continue
 
-            font_name, font_size = _get_word_font_info(page, row["batch_word"])
-            batch_x = row["batch_word"]["x0"]
-            batch_y = row["batch_word"]["top"]
-            if batch_x < 100 and batch_y > 450:
-                batch_y -= 2
-            batch_replacements.append(
-                {
-                    "text": matched_info.get("batch_number") or matched_info.get("hu_identification_2", ""),
-                    "x": batch_x,
-                    "y": batch_y,
-                    "width": row["batch_word"]["x1"] - row["batch_word"]["x0"],
-                    "height": row["batch_word"]["bottom"] - row["batch_word"]["top"],
-                    "font_size": font_size,
-                    "font_name": font_name,
-                    "raw_width": row["batch_word"]["x1"] - row["batch_word"]["x0"],
-                }
-            )
+            gross_weight_word = _find_weight_word(page_words)
+            if not gross_weight_word:
+                continue
 
-        gross_weight_word = _find_weight_word(page_words)
-        gross_weight_replacement = None
-        if gross_weight_word:
             gross_word = gross_weight_word.get("gross")
             net_word = gross_weight_word.get("net")
             unit_word = gross_weight_word.get("unit")
@@ -547,34 +571,44 @@ def build_pdf_replacement_plan(input_pdf, hu_info):
             if not gross_word:
                 gross_word = unit_word
             if not gross_word:
-                gross_weight_word = None
-            else:
-                font_name, font_size = _get_word_font_info(page, gross_word)
-                gross_weight_value = _format_weight_like_sample(gross_word["text"], hu_info.get("total_weight_sum", 0.0))
-                if not _is_same_weight_value(gross_word["text"], gross_weight_value):
-                    net_weight_value = net_word["text"].lstrip("/") if net_word else ""
-                    unit_text = unit_word["text"] if unit_word else "KG"
+                continue
 
-                    if not net_weight_value:
-                        net_weight_value = "400.000"
-                    if not unit_text:
-                        unit_text = "KG"
+            font_name, font_size = _get_word_font_info(page, gross_word)
+            gross_weight_value = _format_weight_like_sample(gross_word["text"], hu_info.get("total_weight_sum", 0.0))
+            if _is_same_weight_value(gross_word["text"], gross_weight_value):
+                logger.info("重量相同，跳过替换")
+                continue
 
-                    gross_weight_replacement = {
-                        "text": f"{gross_weight_value} /{net_weight_value} {unit_text}",
-                        "x": gross_word["x0"],
-                        "y": gross_word["top"] - 2,
-                        "width": (unit_word["x1"] if unit_word else gross_word["x1"]) - gross_word["x0"],
-                        "height": gross_word["bottom"] - gross_word["top"],
-                        "font_size": font_size,
-                        "font_name": font_name,
-                    }
-                else:
-                    logger.info("重量相同，跳过替换")
+            net_weight_value = net_word["text"].lstrip("/") if net_word else ""
+            unit_text = unit_word["text"] if unit_word else "KG"
+
+            if not net_weight_value:
+                net_weight_value = "400.000"
+            if not unit_text:
+                unit_text = "KG"
+
+            gross_weight_replacement = {
+                "page_index": 0,
+                "text": f"{gross_weight_value} /{net_weight_value} {unit_text}",
+                "x": gross_word["x0"],
+                "y": gross_word["top"] - 2,
+                "width": (unit_word["x1"] if unit_word else gross_word["x1"]) - gross_word["x0"],
+                "height": gross_word["bottom"] - gross_word["top"],
+                "font_size": font_size,
+                "font_name": font_name,
+            }
+
+    if total_package_count is not None and len(batch_replacements) != total_package_count:
+        logger.warning(
+            "搬运单元数量与总包装数不一致: got=%s expected=%s",
+            len(batch_replacements),
+            total_package_count,
+        )
 
     return {
         "batch_replacements": batch_replacements,
         "gross_weight_replacement": gross_weight_replacement,
+        "total_package_count": total_package_count,
     }
 
 
@@ -583,60 +617,47 @@ def update_pdf_with_hu_info(input_pdf, output_pdf, hu_info):
     batch_replacements = replacement_plan["batch_replacements"]
     gross_weight_replacement = replacement_plan["gross_weight_replacement"]
 
-    with pdfplumber.open(input_pdf) as pdf:
-        page_width = pdf.pages[0].width
-        page_height = pdf.pages[0].height
-
-    packet = io.BytesIO()
-    can = canvas.Canvas(packet, pagesize=(page_width, page_height))
-
-    for replacement in batch_replacements:
-        font_name = _register_pdf_font(replacement.get("font_name", "STSong-Light"))
-        font_size = replacement.get("font_size", 10)
-        text_width = pdfmetrics.stringWidth(replacement["text"], font_name, font_size)
-        x = replacement["x"]
-        y = page_height - replacement["y"] - font_size
-        raw_width = replacement.get("raw_width", replacement.get("width", 0))
-
-        can.setFillColor(white)
-        can.rect(x - 1, y - 2, max(text_width, raw_width) + 4, font_size + 5, fill=True, stroke=False)
-        can.setFillColorRGB(0, 0, 0)
-        can.setFont(font_name, font_size)
-        can.drawString(x, y, replacement["text"])
-
-    if gross_weight_replacement:
-        font_name = _register_pdf_font(gross_weight_replacement.get("font_name", "STSong-Light"))
-        font_size = gross_weight_replacement.get("font_size", 10)
-        text_width = pdfmetrics.stringWidth(gross_weight_replacement["text"], font_name, font_size)
-        x = gross_weight_replacement["x"]
-        y = page_height - gross_weight_replacement["y"] - font_size
-
-        can.setFillColor(white)
-        can.rect(
-            x - 1,
-            y - 2,
-            max(text_width, gross_weight_replacement.get("width", 0)) + 4,
-            font_size + 5,
-            fill=True,
-            stroke=False,
-        )
-        can.setFillColorRGB(0, 0, 0)
-        can.setFont(font_name, font_size)
-        can.drawString(x, y, gross_weight_replacement["text"])
-
-    can.save()
-    packet.seek(0)
-
-    new_pdf = PdfReader(packet)
     output = PdfWriter()
 
     with open(input_pdf, "rb") as input_stream:
         existing_pdf = PdfReader(input_stream)
-        page = existing_pdf.pages[0]
-        page.merge_page(new_pdf.pages[0])
-        output.add_page(page)
-        for page_num in range(1, len(existing_pdf.pages)):
-            output.add_page(existing_pdf.pages[page_num])
+        page_groups = {}
+        for replacement in batch_replacements:
+            page_groups.setdefault(replacement.get("page_index", 0), []).append(replacement)
+        if gross_weight_replacement:
+            page_groups.setdefault(gross_weight_replacement.get("page_index", 0), []).append(gross_weight_replacement)
+
+        for page_index, page in enumerate(existing_pdf.pages):
+            page_width = float(page.mediabox.width)
+            page_height = float(page.mediabox.height)
+            page_replacements = page_groups.get(page_index, [])
+            if not page_replacements:
+                output.add_page(page)
+                continue
+
+            packet = io.BytesIO()
+            can = canvas.Canvas(packet, pagesize=(page_width, page_height))
+
+            for replacement in page_replacements:
+                font_name = _register_pdf_font(replacement.get("font_name", "STSong-Light"))
+                font_size = replacement.get("font_size", 10)
+                text_width = pdfmetrics.stringWidth(replacement["text"], font_name, font_size)
+                x = replacement["x"]
+                y = page_height - replacement["y"] - font_size
+                raw_width = replacement.get("raw_width", replacement.get("width", 0))
+
+                can.setFillColor(white)
+                can.rect(x - 1, y - 2, max(text_width, raw_width) + 4, font_size + 5, fill=True, stroke=False)
+                can.setFillColorRGB(0, 0, 0)
+                can.setFont(font_name, font_size)
+                can.drawString(x, y, replacement["text"])
+
+            can.save()
+            packet.seek(0)
+
+            overlay_pdf = PdfReader(packet)
+            page.merge_page(overlay_pdf.pages[0])
+            output.add_page(page)
 
     with open(output_pdf, "wb") as output_stream:
         output.write(output_stream)

@@ -4,6 +4,7 @@ from src.deliverynotechg.pdf_contact import (
     extract_company_name_from_pdf,
     extract_handling_units_from_pdf,
     find_hu_info_in_excel,
+    _extract_total_package_count_from_pdf,
     _is_english_company_pdf,
     _pick_font_from_chars,
 )
@@ -19,6 +20,10 @@ def test_extract_handling_units_from_pdf_finds_second_number():
     handling_units = extract_handling_units_from_pdf("archive/ZSD_DELIVERY_NOTE_SF.pdf")
 
     assert handling_units == ["553977534", "553977533"]
+
+
+def test_extract_total_package_count_from_pdf_reads_21():
+    assert _extract_total_package_count_from_pdf("archive/ZSD_DELIVERY_NOTE_SF (7).pdf") == 21
 
 
 def test_extract_company_name_from_pdf_handles_chinese_delivery_address():
@@ -106,14 +111,16 @@ def test_build_pdf_replacement_plan_only_updates_first_page_weight():
             "510716177",
             "510716176",
         ],
-        "EXPORT_20260604132137-hu.xlsx",
+        "EXPORT_20260606051036.xlsx",
     )
 
     plan = build_pdf_replacement_plan("archive/ZSD_DELIVERY_NOTE_SF (7).pdf", hu_info)
 
+    assert plan["total_package_count"] == 21
     assert len(plan["batch_replacements"]) == 21
-    assert plan["gross_weight_replacement"]["text"].endswith("KG")
-    assert plan["gross_weight_replacement"]["x"] == 394.0
+    assert plan["gross_weight_replacement"] is None
+    assert plan["batch_replacements"][0]["text"] == "P27-Q5MB"
+    assert plan["batch_replacements"][-1]["text"] == "P27-Q5K6"
 
 
 def test_build_pdf_replacement_plan_logs_when_weight_is_unchanged(caplog):
@@ -128,6 +135,20 @@ def test_build_pdf_replacement_plan_logs_when_weight_is_unchanged(caplog):
 
     assert plan["gross_weight_replacement"] is None
     assert "重量相同，跳过替换" in caplog.text
+
+
+def test_build_pdf_replacement_plan_warns_when_package_count_mismatch(caplog):
+    hu_info = {
+        "hu_info_list": [],
+        "total_weight_sum": 0.0,
+    }
+
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        plan = build_pdf_replacement_plan("archive/ZSD_DELIVERY_NOTE_SF (7).pdf", hu_info)
+
+    assert plan["total_package_count"] == 21
+    assert "搬运单元数量与总包装数不一致" in caplog.text
 
 
 def test_is_english_company_pdf_prefers_pdf_language_over_company_name_shape():
