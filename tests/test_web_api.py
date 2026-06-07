@@ -16,15 +16,10 @@ def test_index_page_loads():
 
 def test_process_job_returns_job_id():
     client = TestClient(app)
-    with open("customer_combined.xlsx", "rb") as excel_fp, open("archive/ZSD_DELIVERY_NOTE_SF.pdf", "rb") as pdf_fp:
+    with open("archive/ZSD_DELIVERY_NOTE_SF.pdf", "rb") as pdf_fp:
         resp = client.post(
             "/api/process",
             files={
-                "excel": (
-                    "customer_combined.xlsx",
-                    excel_fp,
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                ),
                 "pdf": ("input.pdf", pdf_fp, "application/pdf"),
             },
         )
@@ -47,6 +42,45 @@ def test_process_job_returns_job_id():
     download = client.get(f"/api/jobs/{body['job_id']}/download")
     assert download.status_code == 200
     assert download.headers["content-type"].startswith("application/pdf")
+
+
+def test_upload_excels_and_list_files(tmp_path, monkeypatch):
+    from src.deliverynotechg.web import server
+
+    monkeypatch.setattr(
+        server,
+        "config",
+        type(server.config)(
+            base_dir=tmp_path / "web_data",
+            excel_dir=tmp_path / "web_data" / "excels",
+            db_path=tmp_path / "web_data" / "jobs.db",
+            upload_dir=tmp_path / "web_data" / "uploads",
+            max_upload_size_mb=server.config.max_upload_size_mb,
+            job_retention_hours=server.config.job_retention_hours,
+            cleanup_interval_seconds=server.config.cleanup_interval_seconds,
+            api_token=server.config.api_token,
+        ),
+    )
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/excels",
+        files={
+            "excels": (
+                "customer_combined.xlsx",
+                open("customer_combined.xlsx", "rb"),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "customer_combined.xlsx" in body["saved_files"]
+
+    listing = client.get("/api/excels")
+    assert listing.status_code == 200
+    assert "customer_combined.xlsx" in listing.json()["files"]
 
 
 def test_rejects_empty_uploads():

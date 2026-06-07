@@ -14,6 +14,38 @@ from .store import SQLiteJobStore
 app = FastAPI()
 config = CONFIG
 store = SQLiteJobStore(config.db_path)
+config.base_dir.mkdir(parents=True, exist_ok=True)
+config.excel_dir.mkdir(parents=True, exist_ok=True)
+config.upload_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _list_excel_files():
+    return sorted(
+        [path for path in config.excel_dir.glob("*.xlsx") if path.is_file()],
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def _get_customer_excel_path():
+    customer_path = config.excel_dir / "customer_combined.xlsx"
+    if customer_path.exists():
+        return customer_path
+
+    excel_files = _list_excel_files()
+    for path in excel_files:
+        if not path.name.lower().startswith("export_"):
+            return path
+
+    return None
+
+
+def _get_export_excel_paths():
+    return [
+        path
+        for path in _list_excel_files()
+        if path.name.lower().startswith("export_")
+    ]
 
 
 def _save_upload(upload: UploadFile, target_path: Path):
@@ -49,13 +81,13 @@ def _require_api_key(x_api_key: str | None):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-def _run_job(job_id: str, pdf_path: Path, excel_path: Path, job_dir: Path):
+def _run_job(job_id: str, pdf_path: Path, excel_path: Path, export_excel_paths: list[Path], job_dir: Path):
     store.update_status(job_id, "processing")
     result = process_uploaded_pdf_job(
         job_id=job_id,
         pdf_path=str(pdf_path),
         customer_excel_path=str(excel_path),
-        export_excel_paths=[],
+        export_excel_paths=[str(path) for path in export_excel_paths],
         job_dir=str(job_dir),
     )
     if result["status"] == "done":
@@ -71,6 +103,7 @@ def _cleanup_loop():
             retention_hours=config.job_retention_hours,
             keep_last_excels=2,
         )
+        store.cleanup_uploaded_excels(config.excel_dir, keep_last=2)
         time.sleep(config.cleanup_interval_seconds)
 
 
@@ -84,22 +117,43 @@ async def index():
     <html>
       <body>
         <h1>Delivery Note PDF Tool</h1>
-        <form id="uploadForm">
+        <form id="excelForm">
           <div><label>API Key <input type="password" id="apiKey" /></label></div>
-          <div><label>Excel <input type="file" name="excel" accept=".xlsx" /></label></div>
+          <div><label>Excel <input type="file" name="excels" accept=".xlsx" multiple /></label></div>
+          <button type="submit">Upload Excel</button>
+        </form>
+        <hr />
+        <form id="pdfForm">
           <div><label>PDF <input type="file" name="pdf" accept=".pdf" /></label></div>
-          <button type="submit">Process</button>
+          <button type="submit">Process PDF</button>
         </form>
         <script>
-          const form = document.getElementById('uploadForm');
-          form.addEventListener('submit', async (event) => {
+          const apiKeyInput = document.getElementById('apiKey');
+          const excelForm = document.getElementById('excelForm');
+          const pdfForm = document.getElementById('pdfForm');
+
+          excelForm.addEventListener('submit', async (event) => {
             event.preventDefault();
             const data = new FormData();
-            data.append('excel', form.querySelector('input[name="excel"]').files[0]);
-            data.append('pdf', form.querySelector('input[name="pdf"]').files[0]);
+            const files = excelForm.querySelector('input[name="excels"]').files;
+            for (const file of files) {
+              data.append('excels', file);
+            }
+            const resp = await fetch('/api/excels', {
+              method: 'POST',
+              headers: { 'X-API-Key': apiKeyInput.value },
+              body: data,
+            });
+            alert(await resp.text());
+          });
+
+          pdfForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const data = new FormData();
+            data.append('pdf', pdfForm.querySelector('input[name="pdf"]').files[0]);
             const resp = await fetch('/api/process', {
               method: 'POST',
-              headers: { 'X-API-Key': document.getElementById('apiKey').value },
+              headers: { 'X-API-Key': apiKeyInput.value },
               body: data,
             });
             alert(await resp.text());
@@ -110,26 +164,69 @@ async def index():
     """
 
 
+@app.get("/api/excels")
+async def list_excels(x_api_key: str | None = Header(default=None, alias="X-API-Key")):
+    _require_api_key(x_api_key)
+    files = _list_excel_files()
+    return {
+        "files": [path.name for path in files],
+        "customer_excel": _get_customer_excel_path().name if _get_customer_excel_path() else "",
+    }
+
+
+@app.post("/api/excels")
+async def upload_excels(
+    excels: list[UploadFile] = File(...),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+):
+    _require_api_key(x_api_key)
+    if not excels:
+        raise HTTPException(status_code=400, detail="At least one Excel file is required")
+
+    saved_files = []
+    for excel in excels:
+        _validate_upload(excel, ".xlsx")
+        _validate_upload_size(excel)
+        saved_path = _save_upload(excel, config.excel_dir / excel.filename)
+        saved_files.append(saved_path.name)
+
+    return {
+        "status": "ok",
+        "saved_files": saved_files,
+        "files": [path.name for path in _list_excel_files()],
+    }
+
+
 @app.post("/api/process")
 async def process_job(
-    excel: UploadFile = File(...),
     pdf: UploadFile = File(...),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ):
     _require_api_key(x_api_key)
-    _validate_upload(excel, ".xlsx")
     _validate_upload(pdf, ".pdf")
-    _validate_upload_size(excel)
     _validate_upload_size(pdf)
 
-    job = store.create_job(original_pdf_name=pdf.filename, original_excel_name=excel.filename)
+    customer_excel_path = _get_customer_excel_path()
+    export_excel_paths = _get_export_excel_paths()
+
+    original_excel_name = customer_excel_path.name if customer_excel_path else ""
+    if not original_excel_name and export_excel_paths:
+        original_excel_name = ", ".join(path.name for path in export_excel_paths)
+    if not original_excel_name:
+        original_excel_name = "workspace"
+
+    job = store.create_job(original_pdf_name=pdf.filename, original_excel_name=original_excel_name)
     job_dir = config.upload_dir / job.job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    excel_path = _save_upload(excel, job_dir / "input.xlsx")
     pdf_path = _save_upload(pdf, job_dir / "input.pdf")
 
-    worker = threading.Thread(target=_run_job, args=(job.job_id, pdf_path, excel_path, job_dir), daemon=True)
+    excel_path = customer_excel_path if customer_excel_path else Path("customer_combined.xlsx")
+    worker = threading.Thread(
+        target=_run_job,
+        args=(job.job_id, pdf_path, excel_path, export_excel_paths, job_dir),
+        daemon=True,
+    )
     worker.start()
 
     return {
@@ -137,6 +234,8 @@ async def process_job(
         "status": "queued",
         "output_pdf": "",
         "error_message": "",
+        "customer_excel": customer_excel_path.name if customer_excel_path else "",
+        "export_excels": [path.name for path in export_excel_paths],
     }
 
 

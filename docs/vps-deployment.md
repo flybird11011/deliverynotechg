@@ -58,6 +58,12 @@ sudo mkdir -p /opt/dn-change/data/web_data/uploads
 sudo mkdir -p /opt/dn-change/data/output
 sudo mkdir -p /opt/dn-change/data/archive
 ```
+### 4. 更新代码
+cd /opt/dn-change
+git status
+git pull origin feature/web-portal
+docker-compose up -d --build
+
 
 ## `.env` 怎么填
 
@@ -174,7 +180,7 @@ curl http://127.0.0.1:9000/
 ### 3. 通过域名访问
 
 ```bash
-curl http://pdf.example.com/
+curl http://dn.zaza.de5.net/
 ```
 
 如果 nginx 已经生效，应该能看到同样的首页内容。

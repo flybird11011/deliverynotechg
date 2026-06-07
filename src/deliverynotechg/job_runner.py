@@ -55,7 +55,9 @@ def process_uploaded_pdf_job(
 
     try:
         company_name = extract_company_name_from_pdf(pdf_path)
-        contact_info = find_contact_in_excel(company_name, customer_excel_path)
+        contact_info = None
+        if customer_excel_path and os.path.exists(customer_excel_path):
+            contact_info = find_contact_in_excel(company_name, customer_excel_path)
         handling_units = extract_handling_units_from_pdf(pdf_path)
         hu_info, _ = _find_hu_info_from_exports(handling_units, export_excel_paths)
 
