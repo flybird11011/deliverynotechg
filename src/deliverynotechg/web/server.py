@@ -96,6 +96,37 @@ def _run_job(job_id: str, pdf_path: Path, excel_path: Path, export_excel_paths: 
         store.update_status(job_id, "failed", error_message=result["error_message"])
 
 
+def _queue_pdf_job(pdf: UploadFile, customer_excel_path: Path | None, export_excel_paths: list[Path]):
+    original_excel_name = customer_excel_path.name if customer_excel_path else ""
+    if not original_excel_name and export_excel_paths:
+        original_excel_name = ", ".join(path.name for path in export_excel_paths)
+    if not original_excel_name:
+        original_excel_name = "workspace"
+
+    job = store.create_job(original_pdf_name=pdf.filename, original_excel_name=original_excel_name)
+    job_dir = config.upload_dir / job.job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    pdf_path = _save_upload(pdf, job_dir / "input.pdf")
+    excel_path = customer_excel_path if customer_excel_path else Path("customer_combined.xlsx")
+    worker = threading.Thread(
+        target=_run_job,
+        args=(job.job_id, pdf_path, excel_path, export_excel_paths, job_dir),
+        daemon=True,
+    )
+    worker.start()
+
+    return {
+        "job_id": job.job_id,
+        "status": "queued",
+        "output_pdf": "",
+        "error_message": "",
+        "download_url": f"/api/jobs/{job.job_id}/download",
+        "original_pdf_name": pdf.filename,
+        "original_excel_name": original_excel_name,
+    }
+
+
 def _cleanup_loop():
     while True:
         store.cleanup_expired_jobs(
@@ -117,7 +148,7 @@ async def index():
     <html>
       <body>
         <h1>Delivery Note PDF Tool</h1>
-        <p><strong>提示：</strong>本程序不保存数据信息，文件会在 1 小时内自动删除。</p>
+        <p><strong>提示:</strong> 本程序不保存数据信息，文件会在 1 小时内自动删除。</p>
         <p><strong>Notice:</strong> This program does not keep your data. Files will be deleted automatically within 1 hour.</p>
         <p>Excel 和 PDF 分开处理。先上传 Excel 到工作目录，再上传 PDF 生成结果。</p>
         <form id="excelForm">
@@ -128,8 +159,8 @@ async def index():
         </form>
         <hr />
         <form id="pdfForm">
-          <h2>Process PDF</h2>
-          <div><label>PDF file <input type="file" name="pdf" accept=".pdf" /></label></div>
+          <h2>Process PDF Files</h2>
+          <div><label>PDF files <input type="file" name="pdfs" accept=".pdf" multiple /></label></div>
           <button type="button" id="processPdfBtn">Process PDF</button>
         </form>
         <hr />
@@ -141,7 +172,7 @@ async def index():
         <div>
           <h2>Job status</h2>
           <pre id="jobStatus">No job started yet.</pre>
-          <a id="downloadLink" href="#" style="display:none;" target="_blank" rel="noopener">Download Output PDF</a>
+          <div id="jobLinks"></div>
         </div>
         <script>
           const apiKeyInput = document.getElementById('apiKey');
@@ -151,8 +182,8 @@ async def index():
           const processPdfBtn = document.getElementById('processPdfBtn');
           const excelList = document.getElementById('excelList');
           const jobStatus = document.getElementById('jobStatus');
-          const downloadLink = document.getElementById('downloadLink');
-          let currentJobId = '';
+          const jobLinks = document.getElementById('jobLinks');
+          let currentJobIds = [];
 
           async function refreshExcelList() {
             const resp = await fetch('/api/excels', {
@@ -182,38 +213,77 @@ async def index():
             alert('Excel files saved');
           });
 
-          async function refreshJobStatus(jobId) {
+          async function loadJob(jobId) {
             const resp = await fetch(`/api/jobs/${jobId}`, {
               headers: { 'X-API-Key': apiKeyInput.value },
             });
             if (!resp.ok) {
-              jobStatus.textContent = `Failed to load job status for ${jobId}`;
-              return false;
+              return null;
             }
-            const data = await resp.json();
-            jobStatus.textContent = JSON.stringify(data, null, 2);
-            if (data.status === 'done' && data.output_pdf) {
-              downloadLink.href = `/api/jobs/${jobId}/download`;
-              downloadLink.style.display = 'inline-block';
-              downloadLink.textContent = 'Download Output PDF';
+            return await resp.json();
+          }
+
+          function renderJobLinks(jobs) {
+            if (!jobs.length) {
+              jobLinks.innerHTML = '';
+              return;
+            }
+            jobLinks.innerHTML = jobs.map((job) => {
+              const download = job.status === 'done' && job.output_pdf
+                ? `<a href="/api/jobs/${job.job_id}/download" target="_blank" rel="noopener">Download ${job.original_pdf_name}</a>`
+                : '';
+              return `<div style="margin: 0.5rem 0;">
+                <div><strong>${job.job_id}</strong> - ${job.status} - ${job.original_pdf_name}</div>
+                ${download}
+              </div>`;
+            }).join('');
+          }
+
+          async function refreshAllJobs() {
+            if (!currentJobIds.length) {
               return true;
             }
-            if (data.status === 'failed') {
-              downloadLink.style.display = 'none';
-              return true;
+            const jobs = [];
+            let allFinished = true;
+            for (const jobId of currentJobIds) {
+              const data = await loadJob(jobId);
+              if (!data) {
+                allFinished = false;
+                continue;
+              }
+              jobs.push(data);
+              if (data.status !== 'done' && data.status !== 'failed') {
+                allFinished = false;
+              }
             }
-            downloadLink.style.display = 'none';
-            return false;
+            jobStatus.textContent = JSON.stringify(jobs, null, 2);
+            renderJobLinks(jobs);
+            return allFinished;
+          }
+
+          function schedulePolling() {
+            const poll = async () => {
+              if (!currentJobIds.length) {
+                return;
+              }
+              const done = await refreshAllJobs();
+              if (!done) {
+                setTimeout(poll, 2000);
+              }
+            };
+            setTimeout(poll, 1000);
           }
 
           processPdfBtn.addEventListener('click', async () => {
-            const pdfInput = pdfForm.querySelector('input[name="pdf"]');
+            const pdfInput = pdfForm.querySelector('input[name="pdfs"]');
             if (!pdfInput.files.length) {
-              alert('Please choose a PDF file first');
+              alert('Please choose one or more PDF files first');
               return;
             }
             const data = new FormData();
-            data.append('pdf', pdfInput.files[0]);
+            for (const file of pdfInput.files) {
+              data.append('pdfs', file);
+            }
             const resp = await fetch('/api/process', {
               method: 'POST',
               headers: { 'X-API-Key': apiKeyInput.value },
@@ -224,21 +294,12 @@ async def index():
               return;
             }
             const result = await resp.json();
-            currentJobId = result.job_id;
-            jobStatus.textContent = JSON.stringify(result, null, 2);
-            downloadLink.style.display = 'none';
-            alert(`Job queued: ${result.job_id}`);
-
-            const poll = async () => {
-              if (!currentJobId) {
-                return;
-              }
-              const done = await refreshJobStatus(currentJobId);
-              if (!done) {
-                setTimeout(poll, 2000);
-              }
-            };
-            setTimeout(poll, 1000);
+            const jobs = result.jobs || [];
+            currentJobIds = jobs.map((job) => job.job_id);
+            jobStatus.textContent = JSON.stringify(jobs, null, 2);
+            renderJobLinks(jobs);
+            alert(`Queued ${jobs.length} PDF job(s)`);
+            schedulePolling();
           });
 
           refreshExcelList().catch(() => {
@@ -254,9 +315,10 @@ async def index():
 async def list_excels(x_api_key: str | None = Header(default=None, alias="X-API-Key")):
     _require_api_key(x_api_key)
     files = _list_excel_files()
+    customer_path = _get_customer_excel_path()
     return {
         "files": [path.name for path in files],
-        "customer_excel": _get_customer_excel_path().name if _get_customer_excel_path() else "",
+        "customer_excel": customer_path.name if customer_path else "",
     }
 
 
@@ -285,42 +347,28 @@ async def upload_excels(
 
 @app.post("/api/process")
 async def process_job(
-    pdf: UploadFile = File(...),
+    pdfs: list[UploadFile] | None = File(default=None),
+    pdf: UploadFile | None = File(default=None),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ):
     _require_api_key(x_api_key)
-    _validate_upload(pdf, ".pdf")
-    _validate_upload_size(pdf)
+    uploads = list(pdfs or [])
+    if pdf is not None:
+        uploads.append(pdf)
+
+    if not uploads:
+        raise HTTPException(status_code=400, detail="At least one PDF file is required")
+
+    for upload in uploads:
+        _validate_upload(upload, ".pdf")
+        _validate_upload_size(upload)
 
     customer_excel_path = _get_customer_excel_path()
     export_excel_paths = _get_export_excel_paths()
-
-    original_excel_name = customer_excel_path.name if customer_excel_path else ""
-    if not original_excel_name and export_excel_paths:
-        original_excel_name = ", ".join(path.name for path in export_excel_paths)
-    if not original_excel_name:
-        original_excel_name = "workspace"
-
-    job = store.create_job(original_pdf_name=pdf.filename, original_excel_name=original_excel_name)
-    job_dir = config.upload_dir / job.job_id
-    job_dir.mkdir(parents=True, exist_ok=True)
-
-    pdf_path = _save_upload(pdf, job_dir / "input.pdf")
-
-    excel_path = customer_excel_path if customer_excel_path else Path("customer_combined.xlsx")
-    worker = threading.Thread(
-        target=_run_job,
-        args=(job.job_id, pdf_path, excel_path, export_excel_paths, job_dir),
-        daemon=True,
-    )
-    worker.start()
+    jobs = [_queue_pdf_job(upload, customer_excel_path, export_excel_paths) for upload in uploads]
 
     return {
-        "job_id": job.job_id,
-        "status": "queued",
-        "output_pdf": "",
-        "error_message": "",
-        "download_url": f"/api/jobs/{job.job_id}/download",
+        "jobs": jobs,
         "customer_excel": customer_excel_path.name if customer_excel_path else "",
         "export_excels": [path.name for path in export_excel_paths],
     }

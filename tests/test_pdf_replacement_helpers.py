@@ -81,6 +81,20 @@ def test_build_pdf_replacement_plan_skips_weight_when_value_is_same():
     assert plan["gross_weight_replacement"] is None
 
 
+def test_build_pdf_replacement_plan_logs_when_weight_is_unchanged(caplog):
+    hu_info = {
+        "hu_info_list": [],
+        "total_weight_sum": 3840.0,
+    }
+
+    caplog.clear()
+    with caplog.at_level("INFO"):
+        plan = build_pdf_replacement_plan("archive/ZSD_DELIVERY_NOTE_SF (6)_2259.pdf", hu_info)
+
+    assert plan["gross_weight_replacement"] is None
+    assert "重量相同，跳过替换" in caplog.text
+
+
 def test_is_english_company_pdf_prefers_pdf_language_over_company_name_shape():
     assert _is_english_company_pdf("archive/dn_0626_0639_0644.pdf") is True
     assert _is_english_company_pdf("archive/ZSD_DELIVERY_NOTE_SF (6)_2259.pdf") is False

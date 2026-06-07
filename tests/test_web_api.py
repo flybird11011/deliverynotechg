@@ -26,12 +26,14 @@ def test_process_job_returns_job_id():
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["job_id"]
-    assert body["status"] == "queued"
+    assert body["jobs"]
+    assert body["jobs"][0]["job_id"]
+    assert body["jobs"][0]["status"] == "queued"
 
+    job_id = body["jobs"][0]["job_id"]
     deadline = time.time() + 30
     while time.time() < deadline:
-        status = client.get(f"/api/jobs/{body['job_id']}")
+        status = client.get(f"/api/jobs/{job_id}")
         assert status.status_code == 200
         if status.json()["status"] == "done":
             break
@@ -39,9 +41,29 @@ def test_process_job_returns_job_id():
     else:
         pytest.fail("job did not finish in time")
 
-    download = client.get(f"/api/jobs/{body['job_id']}/download")
+    download = client.get(f"/api/jobs/{job_id}/download")
     assert download.status_code == 200
     assert download.headers["content-type"].startswith("application/pdf")
+
+
+def test_process_job_accepts_multiple_pdfs():
+    client = TestClient(app)
+    with open("archive/ZSD_DELIVERY_NOTE_SF.pdf", "rb") as pdf_fp:
+        resp = client.post(
+            "/api/process",
+            files=[
+                ("pdfs", ("input-1.pdf", pdf_fp, "application/pdf")),
+                ("pdfs", ("input-2.pdf", pdf_fp, "application/pdf")),
+            ],
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["jobs"]) == 2
+    assert body["jobs"][0]["status"] == "queued"
+    assert body["jobs"][1]["status"] == "queued"
+    assert body["jobs"][0]["download_url"].endswith("/download")
+    assert body["jobs"][1]["download_url"].endswith("/download")
 
 
 def test_upload_excels_and_list_files(tmp_path, monkeypatch):

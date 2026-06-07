@@ -2,6 +2,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import uuid4
 
 
 @dataclass
@@ -45,7 +46,7 @@ class SQLiteJobStore:
 
     def create_job(self, original_pdf_name, original_excel_name):
         now = datetime.now(timezone.utc).isoformat()
-        job_id = f"job-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        job_id = f"job-{uuid4().hex}"
         with self._connect() as conn:
             conn.execute(
                 """

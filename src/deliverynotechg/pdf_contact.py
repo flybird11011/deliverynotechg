@@ -1,5 +1,6 @@
 import io
 import os
+import logging
 import re
 from pathlib import Path
 
@@ -35,6 +36,9 @@ _SYSTEM_FONT_FILES = {
         Path(r"C:\Windows\Fonts\simsun.ttc"),
     ],
 }
+
+
+logger = logging.getLogger(__name__)
 
 
 def build_batch_replacements(batch_number_positions, hu_info_list):
@@ -565,6 +569,8 @@ def build_pdf_replacement_plan(input_pdf, hu_info):
                         "font_size": font_size,
                         "font_name": font_name,
                     }
+                else:
+                    logger.info("重量相同，跳过替换")
 
     return {
         "batch_replacements": batch_replacements,
