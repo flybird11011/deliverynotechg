@@ -160,7 +160,7 @@ async def index():
             });
             const data = await resp.json();
             const files = data.files || [];
-            excelList.textContent = files.length ? files.join('\n') : '(no excel files uploaded)';
+            excelList.textContent = files.length ? files.join('\\n') : '(no excel files uploaded)';
           }
 
           saveExcelBtn.addEventListener('click', async () => {
