@@ -58,11 +58,15 @@ sudo mkdir -p /opt/dn-change/data/web_data/uploads
 sudo mkdir -p /opt/dn-change/data/output
 sudo mkdir -p /opt/dn-change/data/archive
 ```
+
 ### 4. 更新代码
+
+```bash
 cd /opt/dn-change
 git status
 git pull origin feature/web-portal
-docker-compose up -d --build
+sudo docker compose up -d --build
+```
 
 
 ## `.env` 怎么填
