@@ -9,6 +9,7 @@ Const HU_EXCEL_NAME = "EXPORT_hu-1471.xlsx"
 Const HU_REFRESH_THRESHOLD_MINUTES = 30
 Const DOWNLOAD_HU_SCRIPT = "download-hu-1471.vbs"
 Const UPLOAD_EXCELS_SCRIPT = "upload_excels.vbs"
+Const DOWNLOAD_HU_WAIT_SECONDS = 10
 Const POLL_SECONDS = 3
 Const MAX_WAIT_SECONDS = 1800
 
@@ -123,23 +124,33 @@ Sub EnsureHuExcelFreshness()
     End If
 
     If Not needsRefresh Then
+        If Not RunScriptWithLog("upload refreshed HU export", UPLOAD_EXCELS_SCRIPT) Then
+            FinishAndExit 1, "Failed to run " & UPLOAD_EXCELS_SCRIPT
+        End If
         Exit Sub
     End If
 
-    If Not RunScriptWithLog("refresh HU export", DOWNLOAD_HU_SCRIPT) Then
-        FinishAndExit 1, "Failed to run " & DOWNLOAD_HU_SCRIPT
+    If Not StartScriptWithLog("refresh HU export", DOWNLOAD_HU_SCRIPT) Then
+        LogLine "Could not start " & DOWNLOAD_HU_SCRIPT & "; skip refresh and continue."
+        If Not RunScriptWithLog("upload refreshed HU export", UPLOAD_EXCELS_SCRIPT) Then
+            FinishAndExit 1, "Failed to run " & UPLOAD_EXCELS_SCRIPT
+        End If
+        Exit Sub
     End If
+
+    LogLine "Waiting " & DOWNLOAD_HU_WAIT_SECONDS & " seconds before continuing."
+    WScript.Sleep DOWNLOAD_HU_WAIT_SECONDS * 1000
 
     If Not fso.FileExists(excelPath) Then
-        FinishAndExit 1, HU_EXCEL_NAME & " was not created after refresh."
+        LogLine HU_EXCEL_NAME & " was not created after refresh; continue without refreshing it."
+        If Not RunScriptWithLog("upload refreshed HU export", UPLOAD_EXCELS_SCRIPT) Then
+            FinishAndExit 1, "Failed to run " & UPLOAD_EXCELS_SCRIPT
+        End If
+        Exit Sub
     End If
 
-    If Not RunScriptWithArgsAndLog("upload refreshed HU export", UPLOAD_EXCELS_SCRIPT, excelPath) Then
+    If Not RunScriptWithLog("upload refreshed HU export", UPLOAD_EXCELS_SCRIPT) Then
         FinishAndExit 1, "Failed to run " & UPLOAD_EXCELS_SCRIPT
-    End If
-
-    If Not fso.FileExists(excelPath) Then
-        FinishAndExit 1, HU_EXCEL_NAME & " was not created after refresh."
     End If
 
     LogLine HU_EXCEL_NAME & " is refreshed and ready."
@@ -306,6 +317,26 @@ Function RunScriptWithArgsAndLog(label, scriptName, arg1)
     RunScriptWithArgsAndLog = (exitCode = 0)
 End Function
 
+Function StartScriptWithLog(label, scriptName)
+    Dim scriptPath
+    Dim cmd
+
+    scriptPath = fso.BuildPath(scriptFolder, scriptName)
+    cmd = "wscript.exe " & quote & scriptPath & quote
+    LogLine "Starting " & label & ": " & cmd
+
+    On Error Resume Next
+    shell.Run cmd, 0, False
+    If Err.Number <> 0 Then
+        LogLine "Failed to start " & label & ": " & Err.Description
+        Err.Clear
+        StartScriptWithLog = False
+    Else
+        StartScriptWithLog = True
+    End If
+    On Error GoTo 0
+End Function
+
 Function RunCommand(cmd)
     Dim exec
     Dim output
@@ -394,8 +425,11 @@ End Function
 
 Sub FinishAndExit(exitCode, message)
     On Error Resume Next
+    LogLine message
     logStream.Close
     On Error GoTo 0
-    MsgBox message, vbInformation, "Batch Upload Result"
+    If exitCode = 0 Then
+        MsgBox message, vbInformation, "Batch Upload Result"
+    End If
     WScript.Quit exitCode
 End Sub
