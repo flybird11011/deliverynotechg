@@ -15,6 +15,7 @@ def test_index_page_loads():
     assert 'id="apiKey"' in resp.text
     assert "Save Excel Files" in resp.text
     assert "Process PDF" in resp.text
+    assert "downloadJob" in resp.text
 
 
 def test_process_job_returns_job_id():

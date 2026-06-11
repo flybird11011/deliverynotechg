@@ -251,6 +251,26 @@ async def index():
             return await resp.json();
           }
 
+          async function downloadJob(jobId, originalPdfName) {
+            const resp = await fetch(`/api/jobs/${jobId}/download`, {
+              headers: getApiKeyHeaders(),
+            });
+            if (!resp.ok) {
+              alert(await resp.text());
+              return;
+            }
+
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = originalPdfName || `${jobId}.pdf`;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            URL.revokeObjectURL(url);
+          }
+
           function renderJobLinks(jobs) {
             if (!jobs.length) {
               jobLinks.innerHTML = '';
@@ -258,13 +278,19 @@ async def index():
             }
             jobLinks.innerHTML = jobs.map((job) => {
               const download = job.status === 'done' && job.output_pdf
-                ? `<a href="/api/jobs/${job.job_id}/download" target="_blank" rel="noopener">Download ${job.original_pdf_name}</a>`
+                ? `<button type="button" data-job-id="${job.job_id}" data-job-name="${job.original_pdf_name}" class="download-btn">Download ${job.original_pdf_name}</button>`
                 : '';
               return `<div style="margin: 0.5rem 0;">
                 <div><strong>${job.job_id}</strong> - ${job.status} - ${job.original_pdf_name}</div>
                 ${download}
               </div>`;
             }).join('');
+
+            for (const button of jobLinks.querySelectorAll('.download-btn')) {
+              button.addEventListener('click', () => {
+                downloadJob(button.dataset.jobId, button.dataset.jobName);
+              });
+            }
           }
 
           async function refreshAllJobs() {
