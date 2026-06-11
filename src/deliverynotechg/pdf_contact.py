@@ -533,7 +533,7 @@ def _find_weight_word(page_words):
     return None
 
 
-def build_pdf_replacement_plan(input_pdf, hu_info):
+def build_pdf_replacement_plan(input_pdf, hu_info, replace_batch_number=True):
     hu_info_list = hu_info.get("hu_info_list", [])
     hu_map = {
         str(item.get("handling_unit", "")).strip(): item
@@ -549,29 +549,30 @@ def build_pdf_replacement_plan(input_pdf, hu_info):
         for page_index, page in enumerate(pdf.pages):
             page_words = page.extract_words(keep_blank_chars=False, use_text_flow=True)
 
-            for row in _find_batch_rows(page_words):
-                matched_info = hu_map.get(row["handling_unit"])
-                if not matched_info:
-                    continue
+            if replace_batch_number:
+                for row in _find_batch_rows(page_words):
+                    matched_info = hu_map.get(row["handling_unit"])
+                    if not matched_info:
+                        continue
 
-                font_name, font_size = _get_word_font_info(page, row["batch_word"])
-                batch_x = row["batch_word"]["x0"]
-                batch_y = row["batch_word"]["top"]
-                if batch_x < 100 and batch_y > 450:
-                    batch_y -= 2
-                batch_replacements.append(
-                    {
-                        "page_index": page_index,
-                        "text": matched_info.get("batch_number") or matched_info.get("hu_identification_2", ""),
-                        "x": batch_x,
-                        "y": batch_y,
-                        "width": row["batch_word"]["x1"] - row["batch_word"]["x0"],
-                        "height": row["batch_word"]["bottom"] - row["batch_word"]["top"],
-                        "font_size": font_size,
-                        "font_name": font_name,
-                        "raw_width": row["batch_word"]["x1"] - row["batch_word"]["x0"],
-                    }
-                )
+                    font_name, font_size = _get_word_font_info(page, row["batch_word"])
+                    batch_x = row["batch_word"]["x0"]
+                    batch_y = row["batch_word"]["top"]
+                    if batch_x < 100 and batch_y > 450:
+                        batch_y -= 2
+                    batch_replacements.append(
+                        {
+                            "page_index": page_index,
+                            "text": matched_info.get("batch_number") or matched_info.get("hu_identification_2", ""),
+                            "x": batch_x,
+                            "y": batch_y,
+                            "width": row["batch_word"]["x1"] - row["batch_word"]["x0"],
+                            "height": row["batch_word"]["bottom"] - row["batch_word"]["top"],
+                            "font_size": font_size,
+                            "font_name": font_name,
+                            "raw_width": row["batch_word"]["x1"] - row["batch_word"]["x0"],
+                        }
+                    )
 
             if page_index != 0 or gross_weight_replacement is not None:
                 continue
@@ -629,8 +630,8 @@ def build_pdf_replacement_plan(input_pdf, hu_info):
     }
 
 
-def update_pdf_with_hu_info(input_pdf, output_pdf, hu_info):
-    replacement_plan = build_pdf_replacement_plan(input_pdf, hu_info)
+def update_pdf_with_hu_info(input_pdf, output_pdf, hu_info, replace_batch_number=True):
+    replacement_plan = build_pdf_replacement_plan(input_pdf, hu_info, replace_batch_number=replace_batch_number)
     batch_replacements = replacement_plan["batch_replacements"]
     gross_weight_replacement = replacement_plan["gross_weight_replacement"]
 

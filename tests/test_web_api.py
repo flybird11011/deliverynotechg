@@ -69,6 +69,23 @@ def test_process_job_accepts_multiple_pdfs():
     assert body["jobs"][1]["download_url"].endswith("/download")
 
 
+def test_process_job_accepts_replace_batch_number_flag():
+    client = TestClient(app)
+    with open("archive/ZSD_DELIVERY_NOTE_SF.pdf", "rb") as pdf_fp:
+        resp = client.post(
+            "/api/process",
+            data={"replace_batch_number": "false"},
+            files={
+                "pdf": ("input.pdf", pdf_fp, "application/pdf"),
+            },
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["jobs"][0]["status"] == "queued"
+    assert body["replace_batch_number"] is False
+
+
 def test_upload_excels_and_list_files(tmp_path, monkeypatch):
     from src.deliverynotechg.web import server
 

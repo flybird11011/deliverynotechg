@@ -83,7 +83,14 @@ def _require_api_key(x_api_key: str | None):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-def _run_job(job_id: str, pdf_path: Path, excel_paths: list[Path], export_excel_paths: list[Path], job_dir: Path):
+def _run_job(
+    job_id: str,
+    pdf_path: Path,
+    excel_paths: list[Path],
+    export_excel_paths: list[Path],
+    job_dir: Path,
+    replace_batch_number: bool,
+):
     store.update_status(job_id, "processing")
     result = process_uploaded_pdf_job(
         job_id=job_id,
@@ -91,6 +98,7 @@ def _run_job(job_id: str, pdf_path: Path, excel_paths: list[Path], export_excel_
         customer_excel_paths=[str(path) for path in excel_paths],
         export_excel_paths=[str(path) for path in export_excel_paths],
         job_dir=str(job_dir),
+        replace_batch_number=replace_batch_number,
     )
     if result["status"] == "done":
         store.update_status(job_id, "done", output_pdf=result["output_pdf"])
@@ -98,7 +106,12 @@ def _run_job(job_id: str, pdf_path: Path, excel_paths: list[Path], export_excel_
         store.update_status(job_id, "failed", error_message=result["error_message"])
 
 
-def _queue_pdf_job(pdf: UploadFile, customer_excel_paths: list[Path], export_excel_paths: list[Path]):
+def _queue_pdf_job(
+    pdf: UploadFile,
+    customer_excel_paths: list[Path],
+    export_excel_paths: list[Path],
+    replace_batch_number: bool,
+):
     original_excel_name = customer_excel_paths[0].name if customer_excel_paths else ""
     if len(customer_excel_paths) > 1:
         original_excel_name = ", ".join(path.name for path in customer_excel_paths)
@@ -115,7 +128,7 @@ def _queue_pdf_job(pdf: UploadFile, customer_excel_paths: list[Path], export_exc
     excel_paths = customer_excel_paths if customer_excel_paths else [Path("customer_combined.xlsx"), Path("customer_combined-ge.xlsx")]
     worker = threading.Thread(
         target=_run_job,
-        args=(job.job_id, pdf_path, excel_paths, export_excel_paths, job_dir),
+        args=(job.job_id, pdf_path, excel_paths, export_excel_paths, job_dir, replace_batch_number),
         daemon=True,
     )
     worker.start()
@@ -364,6 +377,7 @@ async def upload_excels(
 async def process_job(
     pdfs: list[UploadFile] | None = File(default=None),
     pdf: UploadFile | None = File(default=None),
+    replace_batch_number: bool = False,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ):
     _require_api_key(x_api_key)
@@ -380,12 +394,16 @@ async def process_job(
 
     customer_excel_paths = _get_customer_excel_paths()
     export_excel_paths = _get_export_excel_paths()
-    jobs = [_queue_pdf_job(upload, customer_excel_paths, export_excel_paths) for upload in uploads]
+    jobs = [
+        _queue_pdf_job(upload, customer_excel_paths, export_excel_paths, replace_batch_number)
+        for upload in uploads
+    ]
 
     return {
         "jobs": jobs,
         "customer_excels": [path.name for path in customer_excel_paths],
         "export_excels": [path.name for path in export_excel_paths],
+        "replace_batch_number": replace_batch_number,
     }
 
 

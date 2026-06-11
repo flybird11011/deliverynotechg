@@ -42,6 +42,7 @@ def process_uploaded_pdf_job(
     customer_excel_paths,
     export_excel_paths,
     job_dir,
+    replace_batch_number=False,
 ):
     job_dir_path = Path(job_dir)
     job_dir_path.mkdir(parents=True, exist_ok=True)
@@ -71,7 +72,12 @@ def process_uploaded_pdf_job(
             shutil.copy(pdf_path, temp_pdf)
 
         if hu_info:
-            update_pdf_with_hu_info(str(temp_pdf), str(output_pdf), hu_info)
+            update_pdf_with_hu_info(
+                str(temp_pdf),
+                str(output_pdf),
+                hu_info,
+                replace_batch_number=replace_batch_number,
+            )
             if temp_pdf.exists():
                 temp_pdf.unlink()
         else:
